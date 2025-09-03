@@ -5,43 +5,51 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Work Item Analytics Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script>
-        // Wait for Chart.js to fully load before setting defaults
-        window.addEventListener('DOMContentLoaded', function() {
-            console.log('=== CHART.JS DEBUG INFO ===');
-            console.log('Chart.js available:', typeof Chart !== 'undefined');
-            console.log('Chart version:', Chart?.version || 'Unknown');
+        // Simple Chart.js configuration check
+        console.log('Chart.js loading...');
+        
+        // Ensure Chart.js defaults don't disable tooltips
+        if (typeof Chart !== 'undefined') {
+            // Keep defaults simple; configure interaction at chart level
+            Chart.defaults.plugins.tooltip = Chart.defaults.plugins.tooltip || {};
+            Chart.defaults.plugins.tooltip.enabled = true;
+            Chart.defaults.interaction = Chart.defaults.interaction || {};
+            Chart.defaults.interaction.intersect = false;
+            Chart.defaults.interaction.mode = 'nearest';
+            // Ensure default events are set (hover/click/touch)
+            Chart.defaults.events = ['mousemove','mouseout','click','touchstart','touchmove','touchend'];
+            console.log('Chart.js defaults configured for tooltips');
+        }
+
+        // Helper to guard tooltip callbacks from errors that can break hover globally
+        function safe(cb, fallback) {
+            return function() {
+                try { return cb.apply(this, arguments); }
+                catch (err) { console.error('Tooltip callback error:', err); return fallback; }
+            };
+        }
+        
+        // Add debugging after page loads
+        window.addEventListener('load', function() {
+            console.log('=== TOOLTIP DEBUG ===');
+            console.log('Chart.js version:', Chart?.version);
+            console.log('Charts on page:', Chart?.instances?.length || 'Unknown');
             
-            if (typeof Chart !== 'undefined') {
-                // Reset and configure Chart.js defaults
-                Chart.defaults.set('plugins.tooltip', {
-                    enabled: true,
-                    mode: 'nearest',
-                    intersect: false,
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                    titleColor: '#FFFFFF',
-                    bodyColor: '#FFFFFF',
-                    borderColor: '#FFFFFF',
-                    borderWidth: 1,
-                    padding: 8,
-                    cornerRadius: 4,
-                    displayColors: true
+            // Check if any chart elements exist
+            const canvases = document.querySelectorAll('canvas');
+            console.log('Canvas elements found:', canvases.length);
+            
+            // Check Chart instances
+            if (Chart.instances) {
+                Chart.instances.forEach((instance, index) => {
+                    console.log(`Chart ${index}:`, instance.config.type, 'Tooltip enabled:', instance.options?.plugins?.tooltip?.enabled);
                 });
-                
-                Chart.defaults.set('interaction', {
-                    mode: 'nearest',
-                    intersect: false,
-                    includeInvisible: false
-                });
-                
-                console.log('✅ Chart.js defaults configured');
-            } else {
-                console.error('❌ Chart.js not available');
             }
-            console.log('============================');
+            console.log('==================');
         });
     </script>
     <style>
@@ -50,11 +58,11 @@
         .chart-container { 
             min-height: 350px; 
             position: relative;
-            pointer-events: auto;
         }
         canvas { 
-            pointer-events: auto !important;
-            cursor: pointer;
+            position: relative !important;
+            z-index: 1 !important;
+            pointer-events: auto; /* ensure hover/click are captured */
         }
         .kpi { font-size: 1.5rem; font-weight: bold; }
         .table-responsive { max-height: 400px; overflow-y: auto; }
@@ -97,6 +105,7 @@
         <input type="file" id="csvFileInput" accept=".csv" class="form-control">
     </div>
     <div id="kpiSection" class="dashboard-section row text-center"></div>
+    
     <div class="dashboard-section row">
         <div class="col-md-6 chart-container">
             <canvas id="ticketsPerPersonChart"></canvas>
@@ -115,41 +124,6 @@
     </div>
 
     <div class="dashboard-section">
-        <h3>Average Time to Close PBI's (by Developer)</h3>
-        <p class="text-muted mb-3">
-            <small><strong>Calculation:</strong> Time from development start date (Start Date field) until PBI reached Done state (Closed Date field). 
-            Only includes completed PBI's. Green ≤7 days, Orange 8-21 days, Red >21 days.</small>
-        </p>
-        <div class="table-responsive">
-            <table class="table table-striped" id="avgTimeTable">
-                <thead><tr><th>Developer</th><th>Avg Time to Close</th><th>PBI's Completed</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </div>
-    <div class="dashboard-section">
-        <h3>Median Time to Close PBI's (by Developer)</h3>
-        <p class="text-muted mb-3">
-            <small><strong>Calculation:</strong> Middle value of completion times from development start (Start Date) to Done state (Closed Date). 
-            Less affected by outliers than average. Green ≤7 days, Orange 8-21 days, Red >21 days.</small>
-        </p>
-        <div class="table-responsive">
-            <table class="table table-striped" id="medianTimeTable">
-                <thead><tr><th>Developer</th><th>Median Time to Close</th><th>PBI's Completed</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </div>
-    <div class="dashboard-section">
-        <h3>Features Implemented by Developers</h3>
-        <div class="table-responsive">
-            <table class="table table-striped" id="featuresTable">
-                <thead><tr><th>Developer</th><th>Features Completed</th><th>Product Backlog Items</th><th>Tasks</th><th>Total Items</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </div>
-    <div class="dashboard-section">
         <h3>PBI's by Blocked State</h3>
         <div class="table-responsive">
             <table class="table table-striped" id="blockedStateTable">
@@ -165,18 +139,6 @@
                 <thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Developer</th><th>Created Date</th></tr></thead>
                 <tbody></tbody>
             </table>
-        </div>
-    </div>
-    <div class="dashboard-section">
-        <h3>PBI's Closed by Work Item Type</h3>
-        <div class="chart-container">
-            <canvas id="ticketsByTypeChart"></canvas>
-        </div>
-    </div>
-    <div class="dashboard-section">
-        <h3>Development Time Distribution</h3>
-        <div class="chart-container">
-            <canvas id="closeTimeHistogram"></canvas>
         </div>
     </div>
 
@@ -200,11 +162,11 @@
             <div class="col-md-12">
                 <div class="alert alert-info">
                     <strong>Product Backlog Items Only:</strong> 
-                    <span class="badge bg-danger me-2">Red dots = Blocked items (DEBLOCKED = TRUE)</span>
-                    <span class="badge bg-success me-2">Green = Recent items (≤25 days)</span>
-                    <span class="badge bg-warning me-2">Orange = Moderate age (26-60 days)</span>
-                    <span class="badge bg-danger me-2">Red = Old items (>60 days)</span>
-                    <br><small>Only Product Backlog Items are shown. Color coding: Green ≤25 days, Orange 26-60 days, Red >60 days. Blocked items are highlighted in red.</small>
+                    <span class="badge bg-danger me-2">Red = Blocked (DEBLOCKED = TRUE)</span>
+                    <span class="badge bg-success me-2">Green = ≤25 days (non-blocked)</span>
+                    <span class="badge bg-info text-dark me-2">Teal = 26–60 days (non-blocked)</span>
+                    <span class="badge bg-secondary me-2">Gray = >60 days (non-blocked)</span>
+                    <br><small>Only Product Backlog Items are shown. Color coding: Red for blocked only; non-blocked are Blue (≤25d), Teal (26–60d), and Gray (>60d).</small>
                 </div>
                 <div id="healthIndicator" class="alert" style="border-left: 5px solid; margin-top: 10px;">
                     <!-- Health indicator will be populated by JavaScript -->
@@ -235,6 +197,27 @@
     </div>
     
     <div class="dashboard-section">
+        <h3>Features Created per Quarter</h3>
+        <div class="chart-container">
+            <canvas id="featuresPerQuarterChart"></canvas>
+        </div>
+        <div class="table-responsive mt-3">
+            <table class="table table-striped" id="featuresTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Title</th>
+                        <th>Created Date</th>
+                        <th>State</th>
+                        <th>Assigned To</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    
+    <div class="dashboard-section">
         <h3>Aging Distribution Matrix: Age Ranges vs States (Open PBI's)</h3>
         <div class="chart-container">
             <canvas id="agingByStateChart"></canvas>
@@ -256,60 +239,20 @@
     </div>
 </div>
 <script>
-// Debug Chart.js availability and tooltip functionality
-console.log('=== CHART.JS DEBUG INFO ===');
-console.log('Chart.js available:', typeof Chart !== 'undefined');
-console.log('Chart version:', Chart?.version || 'Unknown');
-console.log('Chart defaults:', Chart?.defaults || 'No defaults');
-console.log('============================');
-
-// Test function to verify interaction
-function testChartInteraction() {
-    console.log('Testing chart interaction capabilities...');
-    const testCanvas = document.createElement('canvas');
-    testCanvas.width = 100;
-    testCanvas.height = 100;
-    
-    try {
-        const testChart = new Chart(testCanvas, {
-            type: 'scatter',
-            data: {
-                datasets: [{
-                    data: [{x: 0, y: 0}],
-                    backgroundColor: 'red',
-                    pointRadius: 10
-                }]
-            },
-            options: {
-                plugins: {
-                    tooltip: {
-                        enabled: true,
-                        callbacks: {
-                            label: () => 'Test tooltip'
-                        }
-                    }
-                }
-            }
-        });
-        console.log('✅ Chart creation successful, tooltips should work');
-        testChart.destroy();
-    } catch (error) {
-        console.error('❌ Chart creation failed:', error);
-    }
-}
-
-// Run test when DOM is ready
-document.addEventListener('DOMContentLoaded', testChartInteraction);
-
 function parseQuarter(dateStr) {
     if (!dateStr) return '';
-    const cleanStr = dateStr.replace(/\"/g, '');
+    const cleanStr = String(dateStr).replace(/\"/g, '').trim();
     const [datePart] = cleanStr.split(' '); // Take only date part, ignore time
-    const [day, month, year] = datePart.split('/');
-    const d = new Date(year, month - 1, day);
-    if (isNaN(d)) return '';
-    const q = Math.floor((month - 1) / 3) + 1;
-    return `Q${q} ${year}`;
+    if (!datePart || !datePart.includes('/')) return '';
+    const parts = datePart.split('/');
+    if (parts.length !== 3) return '';
+    // CSV uses MM/DD/YYYY
+    const [mm, dd, yyyy] = parts.map(p => p.trim());
+    const m = parseInt(mm, 10);
+    const y = parseInt(yyyy, 10);
+    if (!m || !y) return '';
+    const q = Math.floor((m - 1) / 3) + 1;
+    return `Q${q} ${y}`;
 }
 function daysBetween(start, end) {
     if (!start || !end) {
@@ -442,14 +385,16 @@ function updateDashboard(data) {
     
     // Convert back to array with unique work items
     const uniqueData = Object.values(uniqueWorkItems);
+    // Restrict to Product Backlog Items for PBI-specific metrics and charts
+    const pbisUnique = uniqueData.filter(row => (row['Work Item Type'] || '').toLowerCase() === 'product backlog item');
     
     console.log('Original data rows:', data.length);
     console.log('Unique work items after deduplication:', uniqueData.length);
     console.log('Sample unique item:', uniqueData[0]);
-    console.log('Done tickets count:', uniqueData.filter(row => row['State'] === 'Done').length);
+    console.log('Done PBI count:', pbisUnique.filter(row => row['State'] === 'Done').length);
     
     // Log first few done tickets for debugging
-    const doneTickets = uniqueData.filter(row => row['State'] === 'Done').slice(0, 3);
+    const doneTickets = pbisUnique.filter(row => row['State'] === 'Done').slice(0, 3);
     console.log('Sample done tickets:', doneTickets.map(ticket => ({
         id: ticket['Work Item Id'],
         assignedTo: ticket['Assigned To'],
@@ -460,14 +405,15 @@ function updateDashboard(data) {
     })));
     
     // Filter only Done tickets and apply proper closed date logic
-    const closedTickets = uniqueData.filter(row => row['State'] === 'Done').map(row => {
+    // Only PBIs are considered "tickets" for PBI-focused visuals
+    const closedTickets = pbisUnique.filter(row => row['State'] === 'Done').map(row => {
         return { ...row, 'Closed Date': getClosedDate(row) };
     });
     
     // KPIs using unique work items
-    const totalTickets = uniqueData.length;
+    const totalTickets = pbisUnique.length;
     const totalClosed = closedTickets.length;
-    const people = [...new Set(uniqueData.map(row => row['Assigned To']))].filter(Boolean);
+    const people = [...new Set(pbisUnique.map(row => row['Assigned To']))].filter(Boolean);
     const avgClosedPerPerson = people.length > 0 ? (totalClosed / people.length).toFixed(2) : '0';
     
     // Debug calculations
@@ -479,7 +425,7 @@ function updateDashboard(data) {
     console.log('Avg closed per person calculation:', totalClosed, '/', people.length, '=', avgClosedPerPerson);
     
     // Calculate open tickets and aging metrics early
-    const openUniqueTickets = uniqueData.filter(row => {
+    const openUniqueTickets = pbisUnique.filter(row => {
         const state = row['State'] || '';
         return state !== 'Done' && state !== 'Removed' && state !== 'Closed';
     });
@@ -686,8 +632,8 @@ function updateDashboard(data) {
     console.log('Average age calculation result:', avgAgeAllOpen);
     
     document.getElementById('kpiSection').innerHTML = `
-        <div class="col-md-2 kpi">Total PBI's: ${uniqueData.length}</div>
-        <div class="col-md-2 kpi">PBI's Closed: ${uniqueData.filter(row => row['State'] === 'Done').length}</div>
+        <div class="col-md-2 kpi">Total PBI's: ${totalTickets}</div>
+        <div class="col-md-2 kpi">PBI's Closed: ${totalClosed}</div>
         <div class="col-md-2 kpi">Open PBI's: ${openTicketsCount}</div>
         <div class="col-md-3 kpi">Avg Age (Open): ${avgAgeAllOpen} days</div>
         <div class="col-md-3 kpi">Avg Closed/Person: ${avgClosedPerPerson}</div>
@@ -706,26 +652,22 @@ function updateDashboard(data) {
         },
         options: {
             responsive: true,
-            onClick: function(event, elements) {
-                if (elements.length > 0) {
-                    alert('Chart click detected! Tooltips should work.');
-                }
-            },
+            maintainAspectRatio: false,
+            events: ['mousemove','mouseout','click','touchstart','touchmove','touchend'],
+            interaction: { intersect: false, mode: 'nearest' },
             plugins: {
                 legend: { display: false },
                 tooltip: {
                     enabled: true,
-                    mode: 'nearest',
-                    intersect: false,
                     callbacks: {
-                        title: function(context) {
-                            return context[0].label;
-                        },
-                        label: function(context) {
-                            return `PBI's Closed: ${context.parsed.y}`;
-                        }
+                        title: safe(function(context) { return context[0].label; }, ''),
+                        label: safe(function(context) { return `PBI's Closed: ${context.parsed.y}`; }, '')
                     }
                 }
+            },
+            scales: {
+                x: { ticks: { autoSkip: true, maxRotation: 30 } },
+                y: { beginAtZero: true }
             }
         }
     });
@@ -745,18 +687,15 @@ function updateDashboard(data) {
         },
         options: {
             responsive: true,
+            maintainAspectRatio: false,
+            events: ['mousemove','mouseout','click','touchstart','touchmove','touchend'],
+            interaction: { intersect: false, mode: 'nearest' },
             plugins: {
                 tooltip: {
                     enabled: true,
-                    mode: 'nearest',
-                    intersect: false,
                     callbacks: {
-                        title: function(context) {
-                            return context[0].label;
-                        },
-                        label: function(context) {
-                            return `PBI's Closed: ${context.parsed.y}`;
-                        }
+                        title: safe(function(context) { return context[0].label; }, ''),
+                        label: safe(function(context) { return `PBI's Closed: ${context.parsed.y}`; }, '')
                     }
                 }
             }
@@ -768,7 +707,7 @@ function updateDashboard(data) {
     const outflowData = {}; // Tickets closed per month
     
     // Calculate inflow (tickets created/opened per month)
-    uniqueData.forEach(row => {
+    pbisUnique.forEach(row => {
         const createdDate = parseDate(row['Created Date']);
         if (createdDate && createdDate <= new Date()) {
             const monthKey = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}`;
@@ -826,6 +765,7 @@ function updateDashboard(data) {
         },
         options: {
             responsive: true,
+            events: ['mousemove','mouseout','click','touchstart','touchmove','touchend'],
             interaction: {
                 intersect: false,
                 mode: 'index'
@@ -846,23 +786,24 @@ function updateDashboard(data) {
                     }
                 },
                 tooltip: {
+                    enabled: true,
                     callbacks: {
-                        title: function(context) {
+                        title: safe(function(context) {
                             return `Month: ${context[0].label}`;
-                        },
-                        label: function(context) {
+                        }, ''),
+                        label: safe(function(context) {
                             const datasetLabel = context.dataset.label;
                             const value = context.parsed.y;
                             return `${datasetLabel}: ${value} tickets`;
-                        },
-                        afterBody: function(context) {
+                        }, ''),
+                        afterBody: safe(function(context) {
                             const monthKey = context[0].label;
                             const inflow = inflowData[monthKey] || 0;
                             const outflow = outflowData[monthKey] || 0;
                             const netFlow = inflow - outflow;
                             const netLabel = netFlow > 0 ? 'Net Increase' : netFlow < 0 ? 'Net Decrease' : 'Net Neutral';
                             return [`Net Flow: ${netFlow} tickets (${netLabel})`];
-                        }
+                        }, [])
                     }
                 }
             },
@@ -962,14 +903,12 @@ function updateDashboard(data) {
     
     // Function to get color based on value
     function getHeatmapColor(value, maxValue) {
-        if (value === 0) return 'rgba(255, 193, 7, 0.3)'; // Light yellow for 0
+        if (value === 0) return 'rgba(255, 152, 0, 0.9)'; // Orange for 0
         
-        const intensity = value / maxValue;
-        if (intensity <= 0.2) return 'rgba(255, 193, 7, 0.6)'; // Yellow
-        if (intensity <= 0.4) return 'rgba(40, 167, 69, 0.6)'; // Light green
-        if (intensity <= 0.6) return 'rgba(40, 167, 69, 0.8)'; // Medium green
-        if (intensity <= 0.8) return 'rgba(25, 135, 84, 0.9)'; // Dark green
-        return 'rgba(25, 135, 84, 1.0)'; // Darkest green
+        // Color based on actual ticket count ranges
+        if (value >= 7) return 'rgba(27, 94, 32, 1.0)'; // Dark green for 7+
+        if (value >= 2) return 'rgba(76, 175, 80, 0.9)'; // Light green for 2-6
+        return 'rgba(255, 235, 59, 0.8)'; // Yellow for 1
     }
     
     new Chart(developerHeatmapCtx, {
@@ -984,19 +923,20 @@ function updateDashboard(data) {
                 })),
                 backgroundColor: heatmapData.map(point => getHeatmapColor(point.v, maxValue)),
                 borderColor: '#FFFFFF',
-                borderWidth: 2,
-                pointStyle: 'rect', // Rectangular shape
-                pointRadius: 40, // Larger size for better hover detection
-                pointHoverRadius: 45,
-                pointHitRadius: 50 // Larger hit area for hover
+                borderWidth: 1,
+                pointStyle: 'rect',
+                // Keep a tiny point for tooltip anchoring; plugin draws the full cell
+                pointRadius: 2,
+                pointHoverRadius: 2,
+                pointHitRadius: 28
             }]
         },
         options: {
             responsive: true,
-            interaction: {
-                intersect: false,
-                mode: 'nearest'
-            },
+            maintainAspectRatio: false,
+            events: ['mousemove','mouseout','click','touchstart','touchmove','touchend'],
+            interaction: { intersect: false, mode: 'nearest' },
+            hover: { mode: 'nearest', intersect: false, animationDuration: 0 },
             plugins: {
                 title: {
                     display: true,
@@ -1004,13 +944,9 @@ function updateDashboard(data) {
                     font: { size: 16, weight: 'bold' },
                     color: '#2C3E50'
                 },
-                legend: {
-                    display: false
-                },
+                legend: { display: false },
                 tooltip: {
                     enabled: true,
-                    mode: 'nearest',
-                    intersect: false,
                     callbacks: {
                         title: function(context) {
                             const point = context[0];
@@ -1040,16 +976,16 @@ function updateDashboard(data) {
                     },
                     ticks: {
                         stepSize: 1,
+                        align: 'center',
+                        crossAlign: 'center',
                         callback: function(value) {
                             const monthIndex = Math.round(value);
-                            return sortedMonths[monthIndex] ? sortedMonths[monthIndex].split(' ')[0] : ''; // Show just month name
+                            return sortedMonths[monthIndex] ? sortedMonths[monthIndex].split(' ')[0] : '';
                         },
                         maxRotation: 45,
                         font: { size: 10 }
                     },
-                    grid: {
-                        color: 'rgba(44, 62, 80, 0.1)'
-                    }
+                    grid: { display: false }
                 },
                 y: {
                     type: 'linear',
@@ -1063,62 +999,80 @@ function updateDashboard(data) {
                     },
                     ticks: {
                         stepSize: 1,
+                        align: 'center',
+                        crossAlign: 'center',
                         callback: function(value) {
                             const devIndex = Math.round(value);
                             const fullName = sortedDevelopers[devIndex];
-                            return fullName ? fullName.split(' ')[0] : ''; // Show just first name
+                            return fullName ? fullName.split(' ')[0] : '';
                         },
                         font: { size: 10 }
                     },
-                    grid: {
-                        color: 'rgba(44, 62, 80, 0.1)'
-                    }
-                }
-            },
-            animation: {
-                onComplete: function() {
-                    // Draw text on each rectangle after animation completes
-                    const ctx = this.chart.ctx;
-                    const chart = this.chart;
-                    
-                    ctx.font = 'bold 12px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    
-                    console.log('Drawing text on heatmap, total points:', heatmapData.length);
-                    
-                    heatmapData.forEach((point, index) => {
-                        const meta = chart.getDatasetMeta(0);
-                        const element = meta.data[index];
-                        
-                        if (element) {
-                            const x = element.x;
-                            const y = element.y;
-                            const value = point.v;
-                            
-                            console.log(`Point ${index}: x=${x}, y=${y}, value=${value}`);
-                            
-                            // Set text color based on background intensity
-                            if (value === 0) {
-                                ctx.fillStyle = '#6c757d'; // Gray for zero
-                            } else if (value >= maxValue * 0.6) {
-                                ctx.fillStyle = '#FFFFFF'; // White for dark backgrounds
-                            } else {
-                                ctx.fillStyle = '#000000'; // Black for light backgrounds
-                            }
-                            
-                            // Draw only the count number (larger font)
-                            ctx.font = 'bold 14px Arial';
-                            ctx.fillText(value.toString(), x, y);
-                        } else {
-                            console.log(`Element ${index} not found`);
-                        }
-                    });
-                    
-                    console.log('Finished drawing text on heatmap');
+                    grid: { display: false }
                 }
             }
-        }
+        },
+        plugins: [
+            // Draw full cell rectangles behind points to fill gaps
+            {
+                id: 'heatmapCells',
+                beforeDatasetsDraw(chart) {
+                    const { ctx, scales, chartArea } = chart;
+                    const xScale = scales.x;
+                    const yScale = scales.y;
+                    const meta = chart.getDatasetMeta(0);
+                    ctx.save();
+                    // Clip to chart area to avoid drawing outside axes
+                    ctx.beginPath();
+                    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
+                    ctx.clip();
+                    heatmapData.forEach((point, index) => {
+                        const element = meta.data[index];
+                        if (!element) return;
+                        // Compute pixel bounds for the cell, accounting for axis directions
+                        const xPix1 = xScale.getPixelForValue(point.x - 0.5);
+                        const xPix2 = xScale.getPixelForValue(point.x + 0.5);
+                        const yPix1 = yScale.getPixelForValue(point.y - 0.5);
+                        const yPix2 = yScale.getPixelForValue(point.y + 0.5);
+                        const left = Math.min(xPix1, xPix2);
+                        const right = Math.max(xPix1, xPix2);
+                        const top = Math.min(yPix1, yPix2);
+                        const bottom = Math.max(yPix1, yPix2);
+                        const width = right - left;
+                        const height = bottom - top;
+                        if (width <= 0 || height <= 0) return;
+                        const pad = 0; // 0 to fill completely; increase for thin gaps
+                        ctx.fillStyle = getHeatmapColor(point.v, maxValue);
+                        ctx.fillRect(left + pad, top + pad, width - pad*2, height - pad*2);
+                    });
+                    ctx.restore();
+                }
+            },
+            // Draw count labels on top of the cell color
+            {
+                id: 'heatmapPointLabels',
+                afterDatasetsDraw(chart) {
+                    const { ctx } = chart;
+                    const meta = chart.getDatasetMeta(0);
+                    ctx.save();
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.font = 'bold 14px Arial';
+                    heatmapData.forEach((point, index) => {
+                        const element = meta.data[index];
+                        if (!element) return;
+                        const { x, y } = element;
+                        const value = point.v;
+                        let color = '#000';
+                        if (value === 0) color = '#000';
+                        else if (value >= 7) color = '#fff';
+                        ctx.fillStyle = color;
+                        ctx.fillText(String(value), x, y);
+                    });
+                    ctx.restore();
+                }
+            }
+        ]
     });
     
     // Add a legend/scale for the heatmap
@@ -1126,10 +1080,10 @@ function updateDashboard(data) {
         <div style="margin-top: 10px; text-align: center;">
             <strong>PBI Count Scale:</strong>
             <span style="display: inline-block; margin: 0 10px;">
-                <span style="background: rgba(255, 193, 7, 0.3); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #6c757d; font-weight: bold;">0</span>
-                <span style="background: rgba(255, 193, 7, 0.6); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #000; font-weight: bold;">1-${Math.ceil(maxValue * 0.2)}</span>
-                <span style="background: rgba(40, 167, 69, 0.6); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #000; font-weight: bold;">${Math.ceil(maxValue * 0.2) + 1}-${Math.ceil(maxValue * 0.6)}</span>
-                <span style="background: rgba(25, 135, 84, 0.9); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #fff; font-weight: bold;">${Math.ceil(maxValue * 0.6) + 1}-${maxValue}</span>
+                <span style="background: rgba(255, 152, 0, 0.9); padding: 8px 12px; margin: 2px; border: 1px solid #cc8400; color: #000; font-weight: bold;">0</span>
+                <span style="background: rgba(255, 235, 59, 0.8); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #000; font-weight: bold;">1</span>
+                <span style="background: rgba(76, 175, 80, 0.9); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #000; font-weight: bold;">2–6</span>
+                <span style="background: rgba(27, 94, 32, 1.0); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #fff; font-weight: bold;">7+</span>
             </span>
         </div>
     `;
@@ -1409,6 +1363,93 @@ function updateDashboard(data) {
         }
     });
     
+    // Features Created per Quarter (based on Created Date)
+    const allFeatures = uniqueData.filter(row => (row['Work Item Type'] || '').toLowerCase() === 'feature');
+    const featuresByQuarter = groupBy(allFeatures, row => parseQuarter(row['Created Date']));
+    const featureQuarterKeys = Object.keys(featuresByQuarter).filter(k => k && k !== 'QNaN undefined').sort((a, b) => {
+        // Sort by year then quarter
+        const [qa, ya] = a.split(' '); // e.g., 'Q3 2025'
+        const [qb, yb] = b.split(' ');
+        const ia = parseInt(ya, 10), ib = parseInt(yb, 10);
+        const qaNum = parseInt(qa.replace('Q',''), 10), qbNum = parseInt(qb.replace('Q',''), 10);
+        return ia === ib ? qaNum - qbNum : ia - ib;
+    });
+    
+    const featuresPerQuarterCtx = document.getElementById('featuresPerQuarterChart').getContext('2d');
+    new Chart(featuresPerQuarterCtx, {
+        type: 'bar',
+        data: {
+            labels: featureQuarterKeys,
+            datasets: [{
+                label: 'Features Created',
+                data: featureQuarterKeys.map(k => (featuresByQuarter[k] || []).length),
+                backgroundColor: 'rgba(52, 152, 219, 0.7)',
+                borderColor: '#3498DB',
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Features Created per Quarter (by Created Date)',
+                    font: { size: 16, weight: 'bold' },
+                    color: '#2C3E50'
+                },
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    callbacks: {
+                        title: function(context) { return `Quarter: ${context[0].label}`; },
+                        label: function(context) { return `Features: ${context.parsed.y}`; }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    title: { display: true, text: 'Quarter', font: { size: 14, weight: 'bold' } },
+                    grid: { display: false }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'Count', font: { size: 14, weight: 'bold' } }
+                }
+            }
+        }
+    });
+    
+    // Populate Features table (basic details, most recent first by Created Date)
+    const parseDateSafe = (d) => {
+        if (!d) return null;
+        const clean = String(d).split(' ')[0];
+        const parts = clean.split('/');
+        if (parts.length === 3) return new Date(parts[2], parts[0]-1, parts[1]);
+        const dt = new Date(clean);
+        return isNaN(dt) ? null : dt;
+    };
+    const featuresSorted = allFeatures
+        .map(f => ({
+            id: f['Work Item Id'] || f['ID'] || '',
+            title: f['Title'] || '',
+            created: f['Created Date'] || '',
+            state: f['State'] || 'Unknown',
+            assignee: f['Assigned To'] || 'Unassigned',
+            sortDate: parseDateSafe(f['Created Date']) || new Date(0)
+        }))
+        .sort((a, b) => b.sortDate - a.sortDate);
+    const featuresTbody = document.querySelector('#featuresTable tbody');
+    featuresTbody.innerHTML = featuresSorted.map(f => `
+        <tr>
+            <td>${f.id}</td>
+            <td title="${f.title}">${f.title.substring(0, 100)}${f.title.length > 100 ? '…' : ''}</td>
+            <td>${f.created ? String(f.created).split(' ')[0] : ''}</td>
+            <td><span class="badge ${f.state === 'Done' ? 'bg-success' : 'bg-secondary'}">${f.state}</span></td>
+            <td>${f.assignee}</td>
+        </tr>
+    `).join('');
+    
     // Ticket state pie chart with semantic colors
     const tspCtx = document.getElementById('ticketStatePieChart').getContext('2d');
     
@@ -1492,92 +1533,8 @@ function updateDashboard(data) {
         },
         options: {responsive:true}
     });
-    // Average time table with enhanced formatting
-    const avgTimeBody = document.querySelector('#avgTimeTable tbody');
-    avgTimeBody.innerHTML = avgTimeRows.map(row => {
-        let timeClass = '';
-        let timeDisplay = row.avgDays;
-        
-        if (row.avgDays !== 'N/A') {
-            const avgValue = parseFloat(row.avgDays);
-            if (avgValue <= 7) {
-                timeClass = 'text-success fw-bold'; // Green for fast completion
-            } else if (avgValue <= 21) {
-                timeClass = 'text-warning fw-bold'; // Orange for moderate time
-            } else {
-                timeClass = 'text-danger fw-bold'; // Red for slow completion
-            }
-            timeDisplay = `${row.avgDays} days`;
-        }
-        
-        return `<tr>
-            <td>${row.developer}</td>
-            <td class="${timeClass}">${timeDisplay}</td>
-            <td><span class="badge bg-secondary">${row.count}</span></td>
-        </tr>`;
-    }).join('');
-    // Median time table with enhanced formatting
-    const medianTimeBody = document.querySelector('#medianTimeTable tbody');
-    medianTimeBody.innerHTML = medianTimeRows.map(row => {
-        let timeClass = '';
-        let timeDisplay = row.medianDays;
-        
-        if (row.medianDays !== 'N/A') {
-            const medianValue = parseFloat(row.medianDays);
-            if (medianValue <= 7) {
-                timeClass = 'text-success fw-bold'; // Green for fast completion
-            } else if (medianValue <= 21) {
-                timeClass = 'text-warning fw-bold'; // Orange for moderate time
-            } else {
-                timeClass = 'text-danger fw-bold'; // Red for slow completion
-            }
-            timeDisplay = `${row.medianDays} days`;
-        }
-        
-        return `<tr>
-            <td>${row.developer}</td>
-            <td class="${timeClass}">${timeDisplay}</td>
-            <td><span class="badge bg-secondary">${row.count}</span></td>
-        </tr>`;
-    }).join('');
     
-    // Features implemented by developers using unique work items
-    const featureStats = {};
-    uniqueData.filter(row => row['State'] === 'Done').forEach(row => {
-        const person = row['Assigned To'];
-        const workItemType = row['Work Item Type'] || 'Unknown';
-        
-        if (!featureStats[person]) {
-            featureStats[person] = {
-                'Feature': 0,
-                'Product Backlog Item': 0,
-                'Task': 0,
-                total: 0
-            };
-        }
-        
-        if (workItemType === 'Feature') {
-            featureStats[person]['Feature']++;
-        } else if (workItemType === 'Product Backlog Item') {
-            featureStats[person]['Product Backlog Item']++;
-        } else if (workItemType === 'Task') {
-            featureStats[person]['Task']++;
-        }
-        featureStats[person].total++;
-    });
-    
-    const featureRows = Object.entries(featureStats).map(([person, stats]) => ({
-        developer: person,
-        features: stats['Feature'],
-        backlogItems: stats['Product Backlog Item'],
-        tasks: stats['Task'],
-        total: stats.total
-    }));
-    
-    const featuresBody = document.querySelector('#featuresTable tbody');
-    featuresBody.innerHTML = featureRows.map(row => 
-        `<tr><td>${row.developer}</td><td>${row.features}</td><td>${row.backlogItems}</td><td>${row.tasks}</td><td>${row.total}</td></tr>`
-    ).join('');
+    // Continue with other existing functionality...
     
     // Blocked state analysis using unique work items
     const blockedCounts = {};
@@ -1634,48 +1591,6 @@ function updateDashboard(data) {
     uniqueData.filter(row => row['State'] === 'Done').forEach(row => {
         const type = row['Work Item Type'] || 'Unknown';
         ticketsByType[type] = (ticketsByType[type] || 0) + 1;
-    });
-    const tbtCtx = document.getElementById('ticketsByTypeChart').getContext('2d');
-    new Chart(tbtCtx, {
-        type: 'bar',
-        data: {
-            labels: Object.keys(ticketsByType),
-            datasets: [{
-                label: 'Tickets Closed',
-                data: Object.values(ticketsByType),
-                backgroundColor: 'rgba(153, 102, 255, 0.6)'
-            }]
-        },
-        options: {responsive:true}
-    });
-    
-    // Tickets closed distribution (histogram) - Development cycle time using unique work items
-    const closedUniqueTickets = uniqueData.filter(row => row['State'] === 'Done');
-    const closeTimes = closedUniqueTickets.map(row => {
-        // Use Start Date if available, otherwise fall back to State Change Date, then Created Date
-        const startDate = row['Start Date'] || row['State Change Date'] || row['Created Date'];
-        return daysBetween(startDate, row['Closed Date']);
-    }).filter(x => typeof x === 'number' && !isNaN(x) && x >= 0);
-    const bins = [0,2,5,10,20,30,60,90,180,365];
-    const histCounts = Array(bins.length).fill(0);
-    closeTimes.forEach(days => {
-        for (let i=0; i<bins.length; i++) {
-            if (days <= bins[i]) { histCounts[i]++; break; }
-        }
-    });
-    const histLabels = bins.map((b,i) => i===0 ? `<=${b}` : `>${bins[i-1]}-${b}`);
-    const histCtx = document.getElementById('closeTimeHistogram').getContext('2d');
-    new Chart(histCtx, {
-        type: 'bar',
-        data: {
-            labels: histLabels,
-            datasets: [{
-                label: 'Tickets Closed',
-                data: histCounts,
-                backgroundColor: 'rgba(75, 192, 192, 0.6)'
-            }]
-        },
-        options: {responsive:true}
     });
     
     // Age distribution histogram for open tickets using unique work items
@@ -1793,29 +1708,20 @@ function updateDashboard(data) {
     // Function to get color based on age and blocked status
     function getScatterColor(ticket) {
         const age = ticket.ageInDays;
-        const isBlocked = ticket['DEBLOCKED'] === 'TRUE' || ticket['DEBLOCKED'] === true || ticket['DEBLOCKED'] === 'True';
-        
+        const isBlocked = (ticket['DEBLOCKED'] === true) || (String(ticket['DEBLOCKED']).toLowerCase() === 'true');
+
         if (isBlocked) {
-            // Red shades for blocked tickets - darker red for older tickets
+            // Red for blocked items (shade slightly by age)
             if (age > 90) return '#8B0000'; // Dark red
-            if (age > 60) return '#DC143C'; // Crimson
-            if (age > 30) return '#FF0000'; // Red
+            if (age > 60) return '#C0392B'; // Strong red
+            if (age > 25) return '#E74C3C'; // Red
             return '#FF6B6B'; // Light red
         }
-        
-        // Color gradient based on age for non-blocked tickets
-        const baseColor = scatterStateColors[ticket['State']] || '#34495e';
-        
-        if (age <= 25) {
-            // Green tones for recent tickets (≤25 days)
-            return '#27AE60'; // Green
-        } else if (age <= 60) {
-            // Orange tones for moderate age (26-60 days)
-            return '#F39C12'; // Orange
-        } else {
-            // Red tones for old tickets (>60 days)
-            return '#E74C3C'; // Red
-        }
+
+        // Non-blocked items: blue/teal/gray by age (no red)
+    if (age <= 25) return '#27AE60'; // Green
+        if (age <= 60) return '#17A2B8'; // Teal
+        return '#6C757D'; // Gray for old but not blocked
     }
     
     // Prepare scatter plot data (Product Backlog Items only)
@@ -1991,10 +1897,11 @@ function updateDashboard(data) {
                     position: 'top',
                     labels: {
                         usePointStyle: true,
-                        filter: function(legendItem, chartData) {
-                            // Reduce legend clutter by showing only key categories
+                        filter: function(legendItem) {
+                            // Show Blocked and all non-blocked age bands
                             return legendItem.text.includes('Blocked') || 
                                    legendItem.text.includes('≤25 days') || 
+                                   legendItem.text.includes('26-60 days') ||
                                    legendItem.text.includes('>60 days');
                         }
                     }
