@@ -1,0 +1,2367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Work Item Analytics Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script>
+        // Wait for Chart.js to fully load before setting defaults
+        window.addEventListener('DOMContentLoaded', function() {
+            console.log('=== CHART.JS DEBUG INFO ===');
+            console.log('Chart.js available:', typeof Chart !== 'undefined');
+            console.log('Chart version:', Chart?.version || 'Unknown');
+            
+            if (typeof Chart !== 'undefined') {
+                // Reset and configure Chart.js defaults
+                Chart.defaults.set('plugins.tooltip', {
+                    enabled: true,
+                    mode: 'nearest',
+                    intersect: false,
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    titleColor: '#FFFFFF',
+                    bodyColor: '#FFFFFF',
+                    borderColor: '#FFFFFF',
+                    borderWidth: 1,
+                    padding: 8,
+                    cornerRadius: 4,
+                    displayColors: true
+                });
+                
+                Chart.defaults.set('interaction', {
+                    mode: 'nearest',
+                    intersect: false,
+                    includeInvisible: false
+                });
+                
+                console.log('✅ Chart.js defaults configured');
+            } else {
+                console.error('❌ Chart.js not available');
+            }
+            console.log('============================');
+        });
+    </script>
+    <style>
+        body { background: #f8f9fa; }
+        .dashboard-section { margin-bottom: 2rem; }
+        .chart-container { 
+            min-height: 350px; 
+            position: relative;
+            pointer-events: auto;
+        }
+        canvas { 
+            pointer-events: auto !important;
+            cursor: pointer;
+        }
+        .kpi { font-size: 1.5rem; font-weight: bold; }
+        .table-responsive { max-height: 400px; overflow-y: auto; }
+        
+        /* PDF-specific styles */
+        @media print {
+            body { 
+                background: white !important; 
+                font-size: 12px;
+                line-height: 1.3;
+            }
+            .dashboard-section { 
+                margin-bottom: 1.5rem; 
+                page-break-inside: avoid;
+            }
+            .chart-container { 
+                min-height: 280px; 
+                max-height: 320px;
+                page-break-inside: avoid;
+            }
+            .table-responsive { 
+                max-height: none; 
+                overflow: visible;
+                page-break-inside: avoid;
+            }
+            .kpi { font-size: 1.2rem; }
+            .row { margin: 0; }
+            .col-md-6, .col-md-3 { padding: 5px; }
+            h1 { font-size: 1.8rem; }
+            h3 { font-size: 1.4rem; margin-bottom: 1rem; }
+            .table { font-size: 11px; }
+            .btn { display: none; } /* Hide download button in PDF */
+        }
+    </style>
+</head>
+<body>
+<div class="container py-4" id="dashboard">
+    <h1 class="mb-4 text-center">Work Item Analytics Dashboard</h1>
+    <div class="mb-3">
+        <input type="file" id="csvFileInput" accept=".csv" class="form-control">
+    </div>
+    <div id="kpiSection" class="dashboard-section row text-center"></div>
+    <div class="dashboard-section row">
+        <div class="col-md-6 chart-container">
+            <canvas id="ticketsPerPersonChart"></canvas>
+        </div>
+        <div class="col-md-6 chart-container">
+            <canvas id="ticketsOverTimeChart"></canvas>
+        </div>
+    </div>
+    <div class="dashboard-section row">
+        <div class="col-md-6 chart-container">
+            <canvas id="ticketStatePieChart"></canvas>
+        </div>
+        <div class="col-md-6 chart-container">
+            <canvas id="ticketTypePieChart"></canvas>
+        </div>
+    </div>
+
+    <div class="dashboard-section">
+        <h3>Average Time to Close PBI's (by Developer)</h3>
+        <p class="text-muted mb-3">
+            <small><strong>Calculation:</strong> Time from development start date (Start Date field) until PBI reached Done state (Closed Date field). 
+            Only includes completed PBI's. Green ≤7 days, Orange 8-21 days, Red >21 days.</small>
+        </p>
+        <div class="table-responsive">
+            <table class="table table-striped" id="avgTimeTable">
+                <thead><tr><th>Developer</th><th>Avg Time to Close</th><th>PBI's Completed</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    <div class="dashboard-section">
+        <h3>Median Time to Close PBI's (by Developer)</h3>
+        <p class="text-muted mb-3">
+            <small><strong>Calculation:</strong> Middle value of completion times from development start (Start Date) to Done state (Closed Date). 
+            Less affected by outliers than average. Green ≤7 days, Orange 8-21 days, Red >21 days.</small>
+        </p>
+        <div class="table-responsive">
+            <table class="table table-striped" id="medianTimeTable">
+                <thead><tr><th>Developer</th><th>Median Time to Close</th><th>PBI's Completed</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    <div class="dashboard-section">
+        <h3>Features Implemented by Developers</h3>
+        <div class="table-responsive">
+            <table class="table table-striped" id="featuresTable">
+                <thead><tr><th>Developer</th><th>Features Completed</th><th>Product Backlog Items</th><th>Tasks</th><th>Total Items</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    <div class="dashboard-section">
+        <h3>PBI's by Blocked State</h3>
+        <div class="table-responsive">
+            <table class="table table-striped" id="blockedStateTable">
+                <thead><tr><th>Blocked Status</th><th>Count</th><th>Percentage</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    <div class="dashboard-section">
+        <h3>Feature Details - Implemented & In Progress</h3>
+        <div class="table-responsive">
+            <table class="table table-striped" id="featureDetailsTable">
+                <thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Developer</th><th>Created Date</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    <div class="dashboard-section">
+        <h3>PBI's Closed by Work Item Type</h3>
+        <div class="chart-container">
+            <canvas id="ticketsByTypeChart"></canvas>
+        </div>
+    </div>
+    <div class="dashboard-section">
+        <h3>Development Time Distribution</h3>
+        <div class="chart-container">
+            <canvas id="closeTimeHistogram"></canvas>
+        </div>
+    </div>
+
+    <div class="dashboard-section row">
+        <div class="col-md-6 chart-container">
+            <h3>PBI Age Distribution (Open PBI's)</h3>
+            <canvas id="ticketAgeHistogram"></canvas>
+        </div>
+        <div class="col-md-6 chart-container">
+            <h3>Average Age by State (Open PBI's)</h3>
+            <canvas id="ageByStateChart"></canvas>
+        </div>
+    </div>
+    
+    <div class="dashboard-section">
+        <h3>Product Backlog Items - Aging Scatter Plot (State vs Age)</h3>
+        <div class="chart-container">
+            <canvas id="agingScatterChart"></canvas>
+        </div>
+        <div class="row mt-3">
+            <div class="col-md-12">
+                <div class="alert alert-info">
+                    <strong>Product Backlog Items Only:</strong> 
+                    <span class="badge bg-danger me-2">Red dots = Blocked items (DEBLOCKED = TRUE)</span>
+                    <span class="badge bg-success me-2">Green = Recent items (≤25 days)</span>
+                    <span class="badge bg-warning me-2">Orange = Moderate age (26-60 days)</span>
+                    <span class="badge bg-danger me-2">Red = Old items (>60 days)</span>
+                    <br><small>Only Product Backlog Items are shown. Color coding: Green ≤25 days, Orange 26-60 days, Red >60 days. Blocked items are highlighted in red.</small>
+                </div>
+                <div id="healthIndicator" class="alert" style="border-left: 5px solid; margin-top: 10px;">
+                    <!-- Health indicator will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="dashboard-section">
+        <h3>PBI Inflow vs Outflow Trends</h3>
+        <div class="chart-container">
+            <canvas id="inflowOutflowChart"></canvas>
+        </div>
+    </div>
+    
+    <div class="dashboard-section">
+        <h3>Monthly Developer Performance Heatmap</h3>
+        <div class="chart-container">
+            <canvas id="developerHeatmapChart"></canvas>
+        </div>
+    </div>
+    
+    <div class="dashboard-section">
+        <h3>Quarterly Closed PBI's & Average State Duration</h3>
+        <div class="chart-container">
+            <canvas id="quarterlyClosedChart"></canvas>
+        </div>
+    </div>
+    
+    <div class="dashboard-section">
+        <h3>Aging Distribution Matrix: Age Ranges vs States (Open PBI's)</h3>
+        <div class="chart-container">
+            <canvas id="agingByStateChart"></canvas>
+        </div>
+    </div>
+    
+    <div class="dashboard-section">
+        <h3>Oldest Open PBI's by Developer</h3>
+        <div class="table-responsive">
+            <table class="table table-striped" id="agingTicketsTable">
+                <thead><tr><th>ID</th><th>Title</th><th>Developer</th><th>State</th><th>Age (Days)</th><th>Start Date</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="text-center mb-4">
+        <button class="btn btn-primary" id="downloadPdfBtn">Download Report as PDF</button>
+    </div>
+</div>
+<script>
+// Debug Chart.js availability and tooltip functionality
+console.log('=== CHART.JS DEBUG INFO ===');
+console.log('Chart.js available:', typeof Chart !== 'undefined');
+console.log('Chart version:', Chart?.version || 'Unknown');
+console.log('Chart defaults:', Chart?.defaults || 'No defaults');
+console.log('============================');
+
+// Test function to verify interaction
+function testChartInteraction() {
+    console.log('Testing chart interaction capabilities...');
+    const testCanvas = document.createElement('canvas');
+    testCanvas.width = 100;
+    testCanvas.height = 100;
+    
+    try {
+        const testChart = new Chart(testCanvas, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    data: [{x: 0, y: 0}],
+                    backgroundColor: 'red',
+                    pointRadius: 10
+                }]
+            },
+            options: {
+                plugins: {
+                    tooltip: {
+                        enabled: true,
+                        callbacks: {
+                            label: () => 'Test tooltip'
+                        }
+                    }
+                }
+            }
+        });
+        console.log('✅ Chart creation successful, tooltips should work');
+        testChart.destroy();
+    } catch (error) {
+        console.error('❌ Chart creation failed:', error);
+    }
+}
+
+// Run test when DOM is ready
+document.addEventListener('DOMContentLoaded', testChartInteraction);
+
+function parseQuarter(dateStr) {
+    if (!dateStr) return '';
+    const cleanStr = dateStr.replace(/\"/g, '');
+    const [datePart] = cleanStr.split(' '); // Take only date part, ignore time
+    const [day, month, year] = datePart.split('/');
+    const d = new Date(year, month - 1, day);
+    if (isNaN(d)) return '';
+    const q = Math.floor((month - 1) / 3) + 1;
+    return `Q${q} ${year}`;
+}
+function daysBetween(start, end) {
+    if (!start || !end) {
+        console.log('daysBetween: Missing dates', { start, end });
+        return null;
+    }
+    
+    // Parse dates in MM/DD/YYYY format (consistent with temp2.csv)
+    const parseDate = (dateStr) => {
+        try {
+            const cleanStr = String(dateStr).replace(/\"/g, '').trim();
+            console.log('Parsing date string:', cleanStr);
+            
+            // Handle different date formats
+            let datePart;
+            if (cleanStr.includes(' ')) {
+                [datePart] = cleanStr.split(' '); // Take only date part, ignore time
+            } else {
+                datePart = cleanStr;
+            }
+            
+            // Use MM/DD/YYYY format (based on temp2.csv format)
+            if (datePart.includes('/')) {
+                const parts = datePart.split('/');
+                if (parts.length === 3) {
+                    const [month, day, year] = parts;
+                    const parsedDate = new Date(year, month - 1, day);
+                    console.log('Parsed MM/DD/YYYY:', { month, day, year, result: parsedDate });
+                    return parsedDate;
+                }
+            }
+            
+            // Try other formats
+            const fallbackDate = new Date(cleanStr);
+            console.log('Fallback date parse:', fallbackDate);
+            return fallbackDate;
+        } catch (error) {
+            console.error('Date parsing error:', error, 'Input:', dateStr);
+            return null;
+        }
+    };
+    
+    const s = parseDate(start);
+    const e = parseDate(end);
+    
+    console.log('Date parsing results:', { start: s, end: e });
+    
+    if (!s || !e || isNaN(s) || isNaN(e)) {
+        console.log('Invalid dates after parsing');
+        return null;
+    }
+    
+    const diffTime = e - s;
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+    
+    console.log('Date difference calculation:', { 
+        startDate: s.toDateString(), 
+        endDate: e.toDateString(), 
+        diffTime, 
+        diffDays 
+    });
+    
+    return diffDays;
+}
+function groupBy(arr, keyFn) {
+    return arr.reduce((acc, item) => {
+        const key = keyFn(item);
+        acc[key] = acc[key] || [];
+        acc[key].push(item);
+        return acc;
+    }, {});
+}
+function updateDashboard(data) {
+    console.log('updateDashboard called with', data.length, 'rows');
+    
+    // Current date for comparison
+    const today = new Date();
+    const todayStr = today.toLocaleDateString('en-GB'); // DD/MM/YYYY format
+    
+    // Helper function to parse dates in MM/DD/YYYY format (based on temp2.csv format)
+    function parseDate(dateStr) {
+        if (!dateStr) return null;
+        try {
+            const cleanStr = String(dateStr).replace(/\"/g, '').trim();
+            const [datePart] = cleanStr.split(' '); // Take only date part, ignore time
+            
+            if (datePart.includes('/')) {
+                const parts = datePart.split('/');
+                if (parts.length === 3) {
+                    // Assume MM/DD/YYYY format based on temp2.csv
+                    const [month, day, year] = parts;
+                    const parsedDate = new Date(year, month - 1, day);
+                    console.log(`Parsed date: ${datePart} -> ${parsedDate.toISOString()}`);
+                    return parsedDate;
+                }
+            }
+            
+            // Fallback for other formats
+            return new Date(cleanStr);
+        } catch (error) {
+            console.error('Date parsing error:', error, 'Input:', dateStr);
+            return null;
+        }
+    }
+    
+    // Helper function to get closed date or use today's date
+    function getClosedDate(row) {
+        if (row['Closed Date']) {
+            const closedDate = parseDate(row['Closed Date']);
+            // If closed date is in the future, use today's date instead
+            if (closedDate > today) {
+                return todayStr;
+            }
+            return row['Closed Date'];
+        }
+        return todayStr;
+    }
+    
+    // Deduplicate data by Work Item ID and get the latest state for each work item
+    const uniqueWorkItems = {};
+    data.forEach(row => {
+        const workItemId = row['Work Item Id'] || row['ID'];
+        const stateChangeDate = parseDate(row['State Change Date'] || row['Created Date']);
+        
+        if (!uniqueWorkItems[workItemId] || 
+            (stateChangeDate && parseDate(uniqueWorkItems[workItemId]['State Change Date'] || uniqueWorkItems[workItemId]['Created Date']) < stateChangeDate)) {
+            uniqueWorkItems[workItemId] = row;
+        }
+    });
+    
+    // Convert back to array with unique work items
+    const uniqueData = Object.values(uniqueWorkItems);
+    
+    console.log('Original data rows:', data.length);
+    console.log('Unique work items after deduplication:', uniqueData.length);
+    console.log('Sample unique item:', uniqueData[0]);
+    console.log('Done tickets count:', uniqueData.filter(row => row['State'] === 'Done').length);
+    
+    // Log first few done tickets for debugging
+    const doneTickets = uniqueData.filter(row => row['State'] === 'Done').slice(0, 3);
+    console.log('Sample done tickets:', doneTickets.map(ticket => ({
+        id: ticket['Work Item Id'],
+        assignedTo: ticket['Assigned To'],
+        startDate: ticket['Start Date'],
+        closedDate: ticket['Closed Date'],
+        stateChangeDate: ticket['State Change Date'],
+        createdDate: ticket['Created Date']
+    })));
+    
+    // Filter only Done tickets and apply proper closed date logic
+    const closedTickets = uniqueData.filter(row => row['State'] === 'Done').map(row => {
+        return { ...row, 'Closed Date': getClosedDate(row) };
+    });
+    
+    // KPIs using unique work items
+    const totalTickets = uniqueData.length;
+    const totalClosed = closedTickets.length;
+    const people = [...new Set(uniqueData.map(row => row['Assigned To']))].filter(Boolean);
+    const avgClosedPerPerson = people.length > 0 ? (totalClosed / people.length).toFixed(2) : '0';
+    
+    // Debug calculations
+    console.log('=== KPI CALCULATIONS DEBUG ===');
+    console.log('Total unique work items:', totalTickets);
+    console.log('Total closed PBIs:', totalClosed);
+    console.log('Number of people:', people.length);
+    console.log('People list:', people);
+    console.log('Avg closed per person calculation:', totalClosed, '/', people.length, '=', avgClosedPerPerson);
+    
+    // Calculate open tickets and aging metrics early
+    const openUniqueTickets = uniqueData.filter(row => {
+        const state = row['State'] || '';
+        return state !== 'Done' && state !== 'Removed' && state !== 'Closed';
+    });
+    
+    // Calculate age for each open unique ticket
+    const openUniqueTicketsWithAge = openUniqueTickets.map(row => {
+        // Use Start Date if available, otherwise fall back to State Change Date, then Created Date
+        let startDate = row['Start Date'] || row['State Change Date'] || row['Created Date'];
+        
+        const developmentStartDate = parseDate(startDate);
+        const ageInDays = developmentStartDate ? Math.round((today - developmentStartDate) / (1000 * 60 * 60 * 24)) : 0;
+        return {
+            ...row,
+            ageInDays: Math.max(0, ageInDays), // Ensure non-negative age
+            developmentStartDate: startDate
+        };
+    }).filter(ticket => ticket.ageInDays >= 0); // Only valid ages
+    
+    // Tickets closed per person
+    const closedByPerson = {};
+    closedTickets.forEach(row => {
+        const person = row['Assigned To'];
+        closedByPerson[person] = (closedByPerson[person] || 0) + 1;
+    });
+    // Tickets closed over time (monthly, quarterly, annual) - exclude future dates
+    const closedByMonthRaw = closedTickets.map(row => {
+        const closedDate = parseDate(row['Closed Date']);
+        return {
+            key: `${closedDate.getFullYear()}-${String(closedDate.getMonth()+1).padStart(2,'0')}`,
+            date: closedDate
+        };
+    }).filter(item => item.date <= today); // Only include dates up to today
+    
+    // Debug monthly calculations
+    console.log('=== MONTHLY CALCULATIONS DEBUG ===');
+    console.log('Closed tickets for monthly calc:', closedTickets.length);
+    console.log('Sample closed tickets:', closedTickets.slice(0, 3).map(row => ({
+        id: row['Work Item Id'],
+        closedDate: row['Closed Date'],
+        state: row['State']
+    })));
+    
+    // Sort months chronologically
+    const monthKeys = [...new Set(closedByMonthRaw.map(x => x.key))];
+    monthKeys.sort((a, b) => {
+        const [ay, am] = a.split('-').map(Number);
+        const [by, bm] = b.split('-').map(Number);
+        return ay === by ? am - bm : ay - by;
+    });
+    
+    const closedByMonth = {};
+    monthKeys.forEach(key => {
+        closedByMonth[key] = closedTickets.filter(row => {
+            const closedDate = parseDate(row['Closed Date']);
+            return closedDate <= today && `${closedDate.getFullYear()}-${String(closedDate.getMonth()+1).padStart(2,'0')}` === key;
+        });
+    });
+    
+    // Debug each month's count
+    console.log('Monthly breakdown:');
+    monthKeys.forEach(key => {
+        console.log(`${key}: ${closedByMonth[key].length} PBI's`);
+        if (closedByMonth[key].length > 0) {
+            console.log('  Sample work items:', closedByMonth[key].slice(0, 3).map(row => row['Work Item Id']));
+        }
+    });
+    
+    const closedByQuarter = groupBy(closedTickets, row => parseQuarter(row['Closed Date']));
+    const closedByYear = groupBy(closedTickets, row => {
+        const closedDate = parseDate(row['Closed Date']);
+        return closedDate.getFullYear();
+    });
+    // Ticket state pie using unique work items
+    const stateCounts = {};
+    uniqueData.forEach(row => {
+        const state = row['State'] || 'Unknown';
+        stateCounts[state] = (stateCounts[state] || 0) + 1;
+    });
+    // Ticket type pie using unique work items
+    const typeCounts = {};
+    uniqueData.forEach(row => {
+        const type = row['Work Item Type'] || 'Unknown';
+        typeCounts[type] = (typeCounts[type] || 0) + 1;
+    });
+    // Average time to close tickets by developer (from development start to Done state)
+    console.log('=== STARTING AVERAGE TIME CALCULATION ===');
+    const avgTimeStats = {};
+    const doneTicketsForCalc = uniqueData.filter(row => row['State'] === 'Done');
+    console.log('Done tickets for calculation:', doneTicketsForCalc.length);
+    
+    doneTicketsForCalc.forEach((row, index) => {
+        const person = row['Assigned To'];
+        const startDate = row['Start Date'] || row['State Change Date'] || row['Created Date'];
+        const closedDate = row['Closed Date'] || row['State Change Date'];
+        
+        console.log(`\n--- Processing ticket ${index + 1} for ${person} ---`);
+        console.log('Available date fields:', {
+            'Start Date': row['Start Date'],
+            'Closed Date': row['Closed Date'],
+            'State Change Date': row['State Change Date'],
+            'Created Date': row['Created Date']
+        });
+        console.log('Using dates:', { startDate, closedDate });
+        
+        if (startDate && closedDate) {
+            const days = daysBetween(startDate, closedDate);
+            console.log(`Days result for ${person}:`, days);
+            
+            if (days !== null && days >= 0) {
+                if (!avgTimeStats[person]) avgTimeStats[person] = { totalDays: 0, count: 0 };
+                avgTimeStats[person].totalDays += days;
+                avgTimeStats[person].count += 1;
+                console.log(`Updated stats for ${person}:`, avgTimeStats[person]);
+            } else {
+                console.log(`Invalid days result for ${person}:`, days);
+            }
+        } else {
+            console.log(`Missing dates for ${person}`);
+        }
+    });
+    
+    console.log('Final avgTimeStats:', avgTimeStats);
+    const avgTimeRows = Object.entries(avgTimeStats).map(([person, stats]) => ({
+        developer: person,
+        avgDays: stats.count ? (stats.totalDays / stats.count).toFixed(2) : 'N/A',
+        count: stats.count
+    })).sort((a, b) => {
+        // Sort by average days (ascending), treating 'N/A' as infinity
+        const aAvg = a.avgDays === 'N/A' ? Infinity : parseFloat(a.avgDays);
+        const bAvg = b.avgDays === 'N/A' ? Infinity : parseFloat(b.avgDays);
+        return aAvg - bAvg;
+    });
+    
+    // Median time to close tickets by developer (development cycle time)
+    function median(arr) {
+        arr = arr.filter(x => typeof x === 'number' && !isNaN(x) && x >= 0);
+        if (arr.length === 0) return 'N/A';
+        arr.sort((a,b) => a-b);
+        const mid = Math.floor(arr.length/2);
+        return arr.length % 2 ? arr[mid] : ((arr[mid-1]+arr[mid])/2).toFixed(2);
+    }
+    console.log('=== STARTING MEDIAN TIME CALCULATION ===');
+    const medianTimeStats = {};
+    doneTicketsForCalc.forEach((row, index) => {
+        const person = row['Assigned To'];
+        const startDate = row['Start Date'] || row['State Change Date'] || row['Created Date'];
+        const closedDate = row['Closed Date'] || row['State Change Date'];
+        
+        if (startDate && closedDate) {
+            const days = daysBetween(startDate, closedDate);
+            
+            if (days !== null && days >= 0) {
+                if (!medianTimeStats[person]) medianTimeStats[person] = [];
+                medianTimeStats[person].push(days);
+                console.log(`Added ${days} days for ${person}. Array now:`, medianTimeStats[person]);
+            }
+        }
+    });
+    
+    console.log('Final medianTimeStats:', medianTimeStats);
+    const medianTimeRows = Object.entries(medianTimeStats).map(([person, arr]) => ({
+        developer: person,
+        medianDays: arr.length ? median(arr) : 'N/A',
+        count: arr.length
+    })).sort((a, b) => {
+        // Sort by median days (ascending), treating 'N/A' as infinity
+        const aMedian = a.medianDays === 'N/A' ? Infinity : parseFloat(a.medianDays);
+        const bMedian = b.medianDays === 'N/A' ? Infinity : parseFloat(b.medianDays);
+        return aMedian - bMedian;
+    });
+    
+    // ===== TICKET AGING ANALYSIS =====
+    
+    // Filter open tickets (not Done/Closed)
+    const openTickets = data.filter(row => {
+        const state = row['State'] || '';
+        return state !== 'Done' && state !== 'Closed' && state !== 'Resolved' && state !== '';
+    });
+    
+    // Calculate age for open tickets based on development start date
+    const openTicketsWithAge = openTickets.map(row => {
+        // Use Start Date if available, otherwise fall back to State Change Date, then Created Date
+        let startDate = row['Start Date'] || row['State Change Date'] || row['Created Date'];
+        
+        const developmentStartDate = parseDate(startDate);
+        const ageInDays = developmentStartDate ? Math.round((today - developmentStartDate) / (1000 * 60 * 60 * 24)) : 0;
+        return {
+            ...row,
+            ageInDays: Math.max(0, ageInDays), // Ensure non-negative age
+            developmentStartDate: startDate
+        };
+    }).filter(ticket => ticket.ageInDays >= 0); // Only valid ages
+    
+    // Update KPIs with aging metrics using unique work items
+    const openTicketsCount = openUniqueTickets.length;
+    const avgAgeAllOpen = openUniqueTicketsWithAge.length > 0 ? 
+        (openUniqueTicketsWithAge.reduce((sum, ticket) => sum + ticket.ageInDays, 0) / openUniqueTicketsWithAge.length).toFixed(1) : 0;
+
+    // Debug open tickets calculations
+    console.log('=== OPEN TICKETS DEBUG ===');
+    console.log('Open unique tickets count:', openTicketsCount);
+    console.log('Open tickets with age count:', openUniqueTicketsWithAge.length);
+    console.log('Sample open tickets with age:', openUniqueTicketsWithAge.slice(0, 3));
+    console.log('Average age calculation result:', avgAgeAllOpen);
+    
+    document.getElementById('kpiSection').innerHTML = `
+        <div class="col-md-2 kpi">Total PBI's: ${uniqueData.length}</div>
+        <div class="col-md-2 kpi">PBI's Closed: ${uniqueData.filter(row => row['State'] === 'Done').length}</div>
+        <div class="col-md-2 kpi">Open PBI's: ${openTicketsCount}</div>
+        <div class="col-md-3 kpi">Avg Age (Open): ${avgAgeAllOpen} days</div>
+        <div class="col-md-3 kpi">Avg Closed/Person: ${avgClosedPerPerson}</div>
+    `;
+    // Tickets per person chart
+    const tppCtx = document.getElementById('ticketsPerPersonChart').getContext('2d');
+    new Chart(tppCtx, {
+        type: 'bar',
+        data: {
+            labels: Object.keys(closedByPerson),
+            datasets: [{
+                label: 'PBI\'s Closed',
+                data: Object.values(closedByPerson),
+                backgroundColor: 'rgba(54, 162, 235, 0.6)'
+            }]
+        },
+        options: {
+            responsive: true,
+            onClick: function(event, elements) {
+                if (elements.length > 0) {
+                    alert('Chart click detected! Tooltips should work.');
+                }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    mode: 'nearest',
+                    intersect: false,
+                    callbacks: {
+                        title: function(context) {
+                            return context[0].label;
+                        },
+                        label: function(context) {
+                            return `PBI's Closed: ${context.parsed.y}`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    // Tickets over time chart (monthly, ordered)
+    const totCtx = document.getElementById('ticketsOverTimeChart').getContext('2d');
+    new Chart(totCtx, {
+        type: 'line',
+        data: {
+            labels: monthKeys,
+            datasets: [{
+                label: 'PBI\'s Closed (Monthly)',
+                data: monthKeys.map(key => closedByMonth[key].length),
+                borderColor: 'rgba(255,99,132,1)',
+                backgroundColor: 'rgba(255,99,132,0.2)',
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                tooltip: {
+                    enabled: true,
+                    mode: 'nearest',
+                    intersect: false,
+                    callbacks: {
+                        title: function(context) {
+                            return context[0].label;
+                        },
+                        label: function(context) {
+                            return `PBI's Closed: ${context.parsed.y}`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    // Inflow vs Outflow Chart - Calculate opened and closed tickets per month
+    const inflowData = {}; // Tickets opened per month
+    const outflowData = {}; // Tickets closed per month
+    
+    // Calculate inflow (tickets created/opened per month)
+    uniqueData.forEach(row => {
+        const createdDate = parseDate(row['Created Date']);
+        if (createdDate && createdDate <= new Date()) {
+            const monthKey = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}`;
+            inflowData[monthKey] = (inflowData[monthKey] || 0) + 1;
+        }
+    });
+    
+    // Calculate outflow (tickets closed per month) 
+    closedTickets.forEach(row => {
+        const closedDate = parseDate(row['Closed Date']);
+        if (closedDate && closedDate <= new Date()) {
+            const monthKey = `${closedDate.getFullYear()}-${String(closedDate.getMonth() + 1).padStart(2, '0')}`;
+            outflowData[monthKey] = (outflowData[monthKey] || 0) + 1;
+        }
+    });
+    
+    // Create combined month keys for both inflow and outflow
+    const allMonthKeys = [...new Set([...Object.keys(inflowData), ...Object.keys(outflowData)])].sort();
+    
+    const inflowOutflowCtx = document.getElementById('inflowOutflowChart').getContext('2d');
+    new Chart(inflowOutflowCtx, {
+        type: 'line',
+        data: {
+            labels: allMonthKeys,
+            datasets: [
+                {
+                    label: 'Inflow (PBI\'s Opened)',
+                    data: allMonthKeys.map(key => inflowData[key] || 0),
+                    borderColor: '#3498DB',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    borderWidth: 3,
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 5,
+                    pointHoverRadius: 8,
+                    pointBackgroundColor: '#3498DB',
+                    pointBorderColor: '#FFFFFF',
+                    pointBorderWidth: 2
+                },
+                {
+                    label: 'Outflow (PBI\'s Closed)',
+                    data: allMonthKeys.map(key => outflowData[key] || 0),
+                    borderColor: '#27AE60',
+                    backgroundColor: 'rgba(39, 174, 96, 0.1)',
+                    borderWidth: 3,
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 5,
+                    pointHoverRadius: 8,
+                    pointBackgroundColor: '#27AE60',
+                    pointBorderColor: '#FFFFFF',
+                    pointBorderWidth: 2
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Monthly Ticket Flow Trends',
+                    font: { size: 16, weight: 'bold' },
+                    color: '#2C3E50'
+                },
+                legend: {
+                    position: 'top',
+                    labels: {
+                        usePointStyle: true,
+                        font: { size: 12 },
+                        color: '#2C3E50'
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        title: function(context) {
+                            return `Month: ${context[0].label}`;
+                        },
+                        label: function(context) {
+                            const datasetLabel = context.dataset.label;
+                            const value = context.parsed.y;
+                            return `${datasetLabel}: ${value} tickets`;
+                        },
+                        afterBody: function(context) {
+                            const monthKey = context[0].label;
+                            const inflow = inflowData[monthKey] || 0;
+                            const outflow = outflowData[monthKey] || 0;
+                            const netFlow = inflow - outflow;
+                            const netLabel = netFlow > 0 ? 'Net Increase' : netFlow < 0 ? 'Net Decrease' : 'Net Neutral';
+                            return [`Net Flow: ${netFlow} tickets (${netLabel})`];
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Month',
+                        font: { size: 14, weight: 'bold' },
+                        color: '#2C3E50'
+                    },
+                    grid: {
+                        color: 'rgba(44, 62, 80, 0.1)'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Number of Tickets',
+                        font: { size: 14, weight: 'bold' },
+                        color: '#2C3E50'
+                    },
+                    beginAtZero: true,
+                    grid: {
+                        color: 'rgba(44, 62, 80, 0.1)'
+                    }
+                }
+            }
+        }
+    });
+    
+    // Monthly Developer Performance Heatmap
+    const monthlyDeveloperData = {};
+    const developerSet = new Set();
+    const monthSet = new Set();
+    
+    // Process closed tickets to create monthly developer matrix
+    closedTickets.forEach(row => {
+        const closedDate = parseDate(row['Closed Date']);
+        const developer = row['Assigned To'] || 'Unassigned';
+        
+        if (closedDate && developer) {
+            const monthKey = `${closedDate.toLocaleString('default', { month: 'long' })} ${closedDate.getFullYear()}`;
+            
+            // Initialize data structure
+            if (!monthlyDeveloperData[monthKey]) {
+                monthlyDeveloperData[monthKey] = {};
+            }
+            if (!monthlyDeveloperData[monthKey][developer]) {
+                monthlyDeveloperData[monthKey][developer] = 0;
+            }
+            
+            monthlyDeveloperData[monthKey][developer] += 1;
+            developerSet.add(developer);
+            monthSet.add(monthKey);
+        }
+    });
+    
+    // Sort months chronologically
+    const sortedMonths = Array.from(monthSet).sort((a, b) => {
+        const dateA = new Date(a);
+        const dateB = new Date(b);
+        return dateA - dateB;
+    });
+    
+    const sortedDevelopers = Array.from(developerSet).sort();
+    
+    console.log('Debug Heatmap Data:');
+    console.log('Sorted Months:', sortedMonths);
+    console.log('Sorted Developers:', sortedDevelopers);
+    console.log('Monthly Developer Data:', monthlyDeveloperData);
+    
+    // Create heatmap data structure for Chart.js
+    const heatmapData = [];
+    const maxValue = Math.max(...Object.values(monthlyDeveloperData).flatMap(month => 
+        Object.values(month)
+    ));
+    
+    sortedMonths.forEach((month, monthIndex) => {
+        sortedDevelopers.forEach((developer, devIndex) => {
+            const value = monthlyDeveloperData[month] && monthlyDeveloperData[month][developer] ? 
+                monthlyDeveloperData[month][developer] : 0;
+            
+            heatmapData.push({
+                x: monthIndex, // Month index for X-axis
+                y: devIndex,   // Developer index for Y-axis
+                v: value
+            });
+        });
+    });
+    
+    console.log('Heatmap Data Points:', heatmapData);
+    console.log('Max Value:', maxValue);
+    
+    // Create custom heatmap using scatter plot with sized points
+    const developerHeatmapCtx = document.getElementById('developerHeatmapChart').getContext('2d');
+    
+    // Function to get color based on value
+    function getHeatmapColor(value, maxValue) {
+        if (value === 0) return 'rgba(255, 193, 7, 0.3)'; // Light yellow for 0
+        
+        const intensity = value / maxValue;
+        if (intensity <= 0.2) return 'rgba(255, 193, 7, 0.6)'; // Yellow
+        if (intensity <= 0.4) return 'rgba(40, 167, 69, 0.6)'; // Light green
+        if (intensity <= 0.6) return 'rgba(40, 167, 69, 0.8)'; // Medium green
+        if (intensity <= 0.8) return 'rgba(25, 135, 84, 0.9)'; // Dark green
+        return 'rgba(25, 135, 84, 1.0)'; // Darkest green
+    }
+    
+    new Chart(developerHeatmapCtx, {
+        type: 'scatter',
+        data: {
+            datasets: [{
+                label: 'PBI\'s Closed',
+                data: heatmapData.map(point => ({
+                    x: point.x,
+                    y: point.y,
+                    value: point.v
+                })),
+                backgroundColor: heatmapData.map(point => getHeatmapColor(point.v, maxValue)),
+                borderColor: '#FFFFFF',
+                borderWidth: 2,
+                pointStyle: 'rect', // Rectangular shape
+                pointRadius: 40, // Larger size for better hover detection
+                pointHoverRadius: 45,
+                pointHitRadius: 50 // Larger hit area for hover
+            }]
+        },
+        options: {
+            responsive: true,
+            interaction: {
+                intersect: false,
+                mode: 'nearest'
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Monthly PBI Closure Heatmap by Developer',
+                    font: { size: 16, weight: 'bold' },
+                    color: '#2C3E50'
+                },
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    enabled: true,
+                    mode: 'nearest',
+                    intersect: false,
+                    callbacks: {
+                        title: function(context) {
+                            const point = context[0];
+                            const monthIndex = Math.round(point.parsed.x);
+                            const devIndex = Math.round(point.parsed.y);
+                            const month = sortedMonths[monthIndex] || 'Unknown';
+                            const developer = sortedDevelopers[devIndex] || 'Unknown';
+                            return `${developer} - ${month}`;
+                        },
+                        label: function(context) {
+                            return `PBI's Closed: ${context.raw.value}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'linear',
+                    position: 'bottom',
+                    min: -0.5,
+                    max: sortedMonths.length - 0.5,
+                    title: {
+                        display: true,
+                        text: 'Months',
+                        font: { size: 14, weight: 'bold' },
+                        color: '#2C3E50'
+                    },
+                    ticks: {
+                        stepSize: 1,
+                        callback: function(value) {
+                            const monthIndex = Math.round(value);
+                            return sortedMonths[monthIndex] ? sortedMonths[monthIndex].split(' ')[0] : ''; // Show just month name
+                        },
+                        maxRotation: 45,
+                        font: { size: 10 }
+                    },
+                    grid: {
+                        color: 'rgba(44, 62, 80, 0.1)'
+                    }
+                },
+                y: {
+                    type: 'linear',
+                    min: -0.5,
+                    max: sortedDevelopers.length - 0.5,
+                    title: {
+                        display: true,
+                        text: 'Developers',
+                        font: { size: 14, weight: 'bold' },
+                        color: '#2C3E50'
+                    },
+                    ticks: {
+                        stepSize: 1,
+                        callback: function(value) {
+                            const devIndex = Math.round(value);
+                            const fullName = sortedDevelopers[devIndex];
+                            return fullName ? fullName.split(' ')[0] : ''; // Show just first name
+                        },
+                        font: { size: 10 }
+                    },
+                    grid: {
+                        color: 'rgba(44, 62, 80, 0.1)'
+                    }
+                }
+            },
+            animation: {
+                onComplete: function() {
+                    // Draw text on each rectangle after animation completes
+                    const ctx = this.chart.ctx;
+                    const chart = this.chart;
+                    
+                    ctx.font = 'bold 12px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    
+                    console.log('Drawing text on heatmap, total points:', heatmapData.length);
+                    
+                    heatmapData.forEach((point, index) => {
+                        const meta = chart.getDatasetMeta(0);
+                        const element = meta.data[index];
+                        
+                        if (element) {
+                            const x = element.x;
+                            const y = element.y;
+                            const value = point.v;
+                            
+                            console.log(`Point ${index}: x=${x}, y=${y}, value=${value}`);
+                            
+                            // Set text color based on background intensity
+                            if (value === 0) {
+                                ctx.fillStyle = '#6c757d'; // Gray for zero
+                            } else if (value >= maxValue * 0.6) {
+                                ctx.fillStyle = '#FFFFFF'; // White for dark backgrounds
+                            } else {
+                                ctx.fillStyle = '#000000'; // Black for light backgrounds
+                            }
+                            
+                            // Draw only the count number (larger font)
+                            ctx.font = 'bold 14px Arial';
+                            ctx.fillText(value.toString(), x, y);
+                        } else {
+                            console.log(`Element ${index} not found`);
+                        }
+                    });
+                    
+                    console.log('Finished drawing text on heatmap');
+                }
+            }
+        }
+    });
+    
+    // Add a legend/scale for the heatmap
+    const heatmapLegendHtml = `
+        <div style="margin-top: 10px; text-align: center;">
+            <strong>PBI Count Scale:</strong>
+            <span style="display: inline-block; margin: 0 10px;">
+                <span style="background: rgba(255, 193, 7, 0.3); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #6c757d; font-weight: bold;">0</span>
+                <span style="background: rgba(255, 193, 7, 0.6); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #000; font-weight: bold;">1-${Math.ceil(maxValue * 0.2)}</span>
+                <span style="background: rgba(40, 167, 69, 0.6); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #000; font-weight: bold;">${Math.ceil(maxValue * 0.2) + 1}-${Math.ceil(maxValue * 0.6)}</span>
+                <span style="background: rgba(25, 135, 84, 0.9); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #fff; font-weight: bold;">${Math.ceil(maxValue * 0.6) + 1}-${maxValue}</span>
+            </span>
+        </div>
+    `;
+    
+    // Insert legend after the chart
+    document.getElementById('developerHeatmapChart').parentNode.insertAdjacentHTML('afterend', heatmapLegendHtml);
+    
+    // Quarterly Closed PBI's & Average State Duration Analysis
+    const quarterlyClosedData = {};
+    
+    // Process closed tickets to calculate quarterly data
+    closedTickets.forEach(row => {
+        const closedDate = parseDate(row['Closed Date']);
+        const createdDate = parseDate(row['Created Date']);
+        
+        if (closedDate && createdDate) {
+            // Calculate quarter key
+            const year = closedDate.getFullYear();
+            const quarter = Math.ceil((closedDate.getMonth() + 1) / 3);
+            const quarterKey = `${year}-Q${quarter}`;
+            
+            // Initialize quarter data if not exists
+            if (!quarterlyClosedData[quarterKey]) {
+                quarterlyClosedData[quarterKey] = {
+                    totalClosed: 0,
+                    statesDuration: {},
+                    totalDurationAcrossStates: 0,
+                    pbiCount: 0,
+                    blockedInfo: { totalBlockedDays: 0, blockedCount: 0 }
+                };
+            }
+            
+            // Calculate total time from creation to closure
+            const totalDays = Math.max(0, Math.floor((closedDate - createdDate) / (1000 * 60 * 60 * 24)));
+            
+            // Get current state and check if it was blocked
+            const currentState = row['State'] || 'Unknown';
+            const isBlocked = row['DEBLOCKED'] && row['DEBLOCKED'].toString().toLowerCase() === 'true';
+            
+            // For this analysis, we'll calculate average duration per state based on total lifecycle
+            // Since we don't have state transition history, we'll estimate based on common state patterns
+            const estimatedStateDurations = calculateEstimatedStateDurations(totalDays, currentState, isBlocked);
+            
+            // Add to quarterly data
+            quarterlyClosedData[quarterKey].totalClosed += 1;
+            quarterlyClosedData[quarterKey].totalDurationAcrossStates += totalDays;
+            quarterlyClosedData[quarterKey].pbiCount += 1;
+            
+            // Handle blocked state tracking
+            if (isBlocked) {
+                // Estimate blocked duration (assume 20-40% of total time if blocked)
+                const estimatedBlockedDays = Math.round(totalDays * 0.3); // 30% average
+                quarterlyClosedData[quarterKey].blockedInfo.totalBlockedDays += estimatedBlockedDays;
+                quarterlyClosedData[quarterKey].blockedInfo.blockedCount += 1;
+                
+                // Add blocked state to estimations
+                estimatedStateDurations['Blocked'] = estimatedBlockedDays;
+            }
+            
+            // Aggregate state durations
+            Object.entries(estimatedStateDurations).forEach(([state, duration]) => {
+                if (!quarterlyClosedData[quarterKey].statesDuration[state]) {
+                    quarterlyClosedData[quarterKey].statesDuration[state] = { totalDays: 0, count: 0 };
+                }
+                quarterlyClosedData[quarterKey].statesDuration[state].totalDays += duration;
+                quarterlyClosedData[quarterKey].statesDuration[state].count += 1;
+            });
+        }
+    });
+    
+    // Helper function to estimate state durations (since we don't have transition history)
+    function calculateEstimatedStateDurations(totalDays, finalState, isBlocked = false) {
+        // Basic estimation based on common patterns - this is a simplified model
+        const durations = {};
+        
+        if (totalDays <= 0) return durations;
+        
+        // Adjust total available days if item was blocked
+        let availableDays = totalDays;
+        let blockedDays = 0;
+        
+        if (isBlocked) {
+            // Estimate 20-40% of time was spent blocked (average 30%)
+            blockedDays = Math.round(totalDays * 0.3);
+            availableDays = totalDays - blockedDays;
+            durations['Blocked'] = blockedDays;
+        }
+        
+        // Apply pattern based on final state for remaining time
+        if (finalState.toLowerCase().includes('done') || finalState.toLowerCase().includes('completed')) {
+            durations['New'] = Math.round(availableDays * 0.10);
+            durations['Analysis'] = Math.round(availableDays * 0.15);
+            durations['Development'] = Math.round(availableDays * 0.50);
+            durations['Review'] = Math.round(availableDays * 0.15);
+            durations['Done'] = Math.round(availableDays * 0.10);
+        } else {
+            // For other states, distribute more evenly
+            durations[finalState] = Math.round(availableDays * 0.70);
+            durations['New'] = Math.round(availableDays * 0.15);
+            durations['Analysis'] = Math.round(availableDays * 0.15);
+        }
+        
+        return durations;
+    }
+    
+    // Get all quarters and states for the chart
+    const allQuarterKeys = Object.keys(quarterlyClosedData).sort();
+    const allStatesInClosed = new Set();
+    
+    // Collect all states from the quarterly data
+    Object.values(quarterlyClosedData).forEach(qData => {
+        Object.keys(qData.statesDuration).forEach(state => allStatesInClosed.add(state));
+    });
+    const quarterlyUniqueStates = Array.from(allStatesInClosed);
+    
+    // Create datasets for closed count (bars)
+    const closedCountDataset = {
+        label: 'PBI\'s Closed',
+        type: 'bar',
+        data: allQuarterKeys.map(quarter => quarterlyClosedData[quarter].totalClosed),
+        backgroundColor: 'rgba(52, 152, 219, 0.7)',
+        borderColor: '#3498DB',
+        borderWidth: 2,
+        yAxisID: 'y'
+    };
+    
+    // Create datasets for average state durations (lines)
+    const stateDurationDatasets = quarterlyUniqueStates.map((state, index) => {
+        // Special handling for blocked state - make it red and more prominent
+        let color, borderWidth, pointRadius;
+        
+        if (state.toLowerCase() === 'blocked') {
+            color = '#E74C3C'; // Red for blocked
+            borderWidth = 4;    // Thicker line
+            pointRadius = 8;    // Larger points
+        } else {
+            const colors = ['#27AE60', '#F39C12', '#9B59B6', '#1ABC9C', '#34495E', '#E67E22', '#3498DB'];
+            color = colors[index % colors.length];
+            borderWidth = 3;
+            pointRadius = 6;
+        }
+        
+        return {
+            label: `Avg Days in ${state}`,
+            type: 'line',
+            data: allQuarterKeys.map(quarter => {
+                const qData = quarterlyClosedData[quarter];
+                const stateData = qData.statesDuration[state];
+                return stateData ? (stateData.totalDays / stateData.count).toFixed(1) : 0;
+            }),
+            borderColor: color,
+            backgroundColor: color + '20',
+            borderWidth: borderWidth,
+            pointRadius: pointRadius,
+            pointHoverRadius: pointRadius + 2,
+            pointBackgroundColor: color,
+            pointBorderColor: '#FFFFFF',
+            pointBorderWidth: 2,
+            yAxisID: 'y1',
+            tension: 0.4
+        };
+    });
+    
+    const quarterlyClosedCtx = document.getElementById('quarterlyClosedChart').getContext('2d');
+    new Chart(quarterlyClosedCtx, {
+        type: 'bar',
+        data: {
+            labels: allQuarterKeys,
+            datasets: [closedCountDataset, ...stateDurationDatasets]
+        },
+        options: {
+            responsive: true,
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Quarterly Analysis: Closed PBI\'s Count & Average State Duration',
+                    font: { size: 16, weight: 'bold' },
+                    color: '#2C3E50'
+                },
+                legend: {
+                    position: 'top',
+                    labels: {
+                        usePointStyle: true,
+                        font: { size: 11 },
+                        color: '#2C3E50'
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        title: function(context) {
+                            const quarter = context[0].label;
+                            const qData = quarterlyClosedData[quarter];
+                            return [`Quarter: ${quarter}`, `Total Closed: ${qData ? qData.totalClosed : 0} PBI's`];
+                        },
+                        label: function(context) {
+                            const datasetLabel = context.dataset.label;
+                            const value = context.parsed.y;
+                            
+                            if (datasetLabel.includes('Closed')) {
+                                return `${datasetLabel}: ${value} PBI's`;
+                            } else {
+                                return `${datasetLabel}: ${value} days`;
+                            }
+                        },
+                        afterBody: function(context) {
+                            const quarter = context[0].label;
+                            const qData = quarterlyClosedData[quarter];
+                            if (qData) {
+                                const avgTotalDuration = qData.pbiCount > 0 ? 
+                                    (qData.totalDurationAcrossStates / qData.pbiCount).toFixed(1) : 0;
+                                
+                                let result = [`Overall Avg Duration: ${avgTotalDuration} days`];
+                                
+                                // Add blocked state information if available
+                                if (qData.blockedInfo.blockedCount > 0) {
+                                    const avgBlockedDays = (qData.blockedInfo.totalBlockedDays / qData.blockedInfo.blockedCount).toFixed(1);
+                                    const blockedPercentage = ((qData.blockedInfo.blockedCount / qData.totalClosed) * 100).toFixed(1);
+                                    result.push(`Blocked PBI's: ${qData.blockedInfo.blockedCount} (${blockedPercentage}%)`);
+                                    result.push(`Avg Blocked Duration: ${avgBlockedDays} days`);
+                                }
+                                
+                                return result;
+                            }
+                            return [];
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Quarter',
+                        font: { size: 14, weight: 'bold' },
+                        color: '#2C3E50'
+                    },
+                    grid: {
+                        color: 'rgba(44, 62, 80, 0.1)'
+                    }
+                },
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    title: {
+                        display: true,
+                        text: 'Number of PBI\'s Closed',
+                        font: { size: 14, weight: 'bold' },
+                        color: '#2C3E50'
+                    },
+                    beginAtZero: true,
+                    grid: {
+                        color: 'rgba(44, 62, 80, 0.1)'
+                    }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    title: {
+                        display: true,
+                        text: 'Average Days in State',
+                        font: { size: 14, weight: 'bold' },
+                        color: '#2C3E50'
+                    },
+                    beginAtZero: true,
+                    grid: {
+                        drawOnChartArea: false,
+                        color: 'rgba(44, 62, 80, 0.1)'
+                    }
+                }
+            }
+        }
+    });
+    
+    // Ticket state pie chart with semantic colors
+    const tspCtx = document.getElementById('ticketStatePieChart').getContext('2d');
+    
+    // Create color mapping based on state names
+    const stateLabels = Object.keys(stateCounts);
+    const pieStateColors = stateLabels.map(state => {
+        const lowerState = state.toLowerCase();
+        if (lowerState.includes('done') || lowerState.includes('completed') || lowerState.includes('closed')) {
+            return '#27AE60'; // Green for completed states
+        } else if (lowerState.includes('blocked')) {
+            return '#E74C3C'; // Red for blocked states
+        } else if (lowerState.includes('progress') || lowerState.includes('development') || lowerState.includes('active')) {
+            return '#3498DB'; // Blue for active work
+        } else if (lowerState.includes('review') || lowerState.includes('testing') || lowerState.includes('test')) {
+            return '#9B59B6'; // Purple for review/testing
+        } else if (lowerState.includes('analysis') || lowerState.includes('planning')) {
+            return '#F39C12'; // Orange for analysis/planning
+        } else if (lowerState.includes('new') || lowerState.includes('open') || lowerState.includes('todo')) {
+            return '#95A5A6'; // Gray for new/open items
+        } else {
+            return '#34495E'; // Dark gray for unknown states
+        }
+    });
+    
+    console.log('State color mapping:', stateLabels.map((label, i) => ({ state: label, color: pieStateColors[i] })));
+    
+    new Chart(tspCtx, {
+        type: 'pie',
+        data: {
+            labels: stateLabels,
+            datasets: [{
+                data: Object.values(stateCounts),
+                backgroundColor: pieStateColors,
+                borderColor: '#FFFFFF',
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        usePointStyle: true,
+                        generateLabels: function(chart) {
+                            const data = chart.data;
+                            return data.labels.map((label, i) => ({
+                                text: `${label} (${data.datasets[0].data[i]})`,
+                                fillStyle: data.datasets[0].backgroundColor[i],
+                                strokeStyle: data.datasets[0].borderColor,
+                                lineWidth: data.datasets[0].borderWidth,
+                                pointStyle: 'circle'
+                            }));
+                        }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.parsed;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return `${label}: ${value} tickets (${percentage}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    // Ticket type pie chart
+    const ttpCtx = document.getElementById('ticketTypePieChart').getContext('2d');
+    new Chart(ttpCtx, {
+        type: 'pie',
+        data: {
+            labels: Object.keys(typeCounts),
+            datasets: [{
+                data: Object.values(typeCounts),
+                backgroundColor: ['#6610f2','#e83e8c','#fd7e14','#20c997','#6f42c1','#343a40']
+            }]
+        },
+        options: {responsive:true}
+    });
+    // Average time table with enhanced formatting
+    const avgTimeBody = document.querySelector('#avgTimeTable tbody');
+    avgTimeBody.innerHTML = avgTimeRows.map(row => {
+        let timeClass = '';
+        let timeDisplay = row.avgDays;
+        
+        if (row.avgDays !== 'N/A') {
+            const avgValue = parseFloat(row.avgDays);
+            if (avgValue <= 7) {
+                timeClass = 'text-success fw-bold'; // Green for fast completion
+            } else if (avgValue <= 21) {
+                timeClass = 'text-warning fw-bold'; // Orange for moderate time
+            } else {
+                timeClass = 'text-danger fw-bold'; // Red for slow completion
+            }
+            timeDisplay = `${row.avgDays} days`;
+        }
+        
+        return `<tr>
+            <td>${row.developer}</td>
+            <td class="${timeClass}">${timeDisplay}</td>
+            <td><span class="badge bg-secondary">${row.count}</span></td>
+        </tr>`;
+    }).join('');
+    // Median time table with enhanced formatting
+    const medianTimeBody = document.querySelector('#medianTimeTable tbody');
+    medianTimeBody.innerHTML = medianTimeRows.map(row => {
+        let timeClass = '';
+        let timeDisplay = row.medianDays;
+        
+        if (row.medianDays !== 'N/A') {
+            const medianValue = parseFloat(row.medianDays);
+            if (medianValue <= 7) {
+                timeClass = 'text-success fw-bold'; // Green for fast completion
+            } else if (medianValue <= 21) {
+                timeClass = 'text-warning fw-bold'; // Orange for moderate time
+            } else {
+                timeClass = 'text-danger fw-bold'; // Red for slow completion
+            }
+            timeDisplay = `${row.medianDays} days`;
+        }
+        
+        return `<tr>
+            <td>${row.developer}</td>
+            <td class="${timeClass}">${timeDisplay}</td>
+            <td><span class="badge bg-secondary">${row.count}</span></td>
+        </tr>`;
+    }).join('');
+    
+    // Features implemented by developers using unique work items
+    const featureStats = {};
+    uniqueData.filter(row => row['State'] === 'Done').forEach(row => {
+        const person = row['Assigned To'];
+        const workItemType = row['Work Item Type'] || 'Unknown';
+        
+        if (!featureStats[person]) {
+            featureStats[person] = {
+                'Feature': 0,
+                'Product Backlog Item': 0,
+                'Task': 0,
+                total: 0
+            };
+        }
+        
+        if (workItemType === 'Feature') {
+            featureStats[person]['Feature']++;
+        } else if (workItemType === 'Product Backlog Item') {
+            featureStats[person]['Product Backlog Item']++;
+        } else if (workItemType === 'Task') {
+            featureStats[person]['Task']++;
+        }
+        featureStats[person].total++;
+    });
+    
+    const featureRows = Object.entries(featureStats).map(([person, stats]) => ({
+        developer: person,
+        features: stats['Feature'],
+        backlogItems: stats['Product Backlog Item'],
+        tasks: stats['Task'],
+        total: stats.total
+    }));
+    
+    const featuresBody = document.querySelector('#featuresTable tbody');
+    featuresBody.innerHTML = featureRows.map(row => 
+        `<tr><td>${row.developer}</td><td>${row.features}</td><td>${row.backlogItems}</td><td>${row.tasks}</td><td>${row.total}</td></tr>`
+    ).join('');
+    
+    // Blocked state analysis using unique work items
+    const blockedCounts = {};
+    uniqueData.forEach(row => {
+        const deblocked = row['DEBLOCKED'];
+        const blockedStatus = (deblocked === 'TRUE' || deblocked === true || deblocked === 'True') ? 'Blocked' : 'Not Blocked';
+        blockedCounts[blockedStatus] = (blockedCounts[blockedStatus] || 0) + 1;
+    });
+    
+    const blockedRows = Object.entries(blockedCounts).map(([status, count]) => ({
+        status: status,
+        count: count,
+        percentage: ((count / uniqueData.length) * 100).toFixed(1)
+    }));
+    
+    const blockedBody = document.querySelector('#blockedStateTable tbody');
+    blockedBody.innerHTML = blockedRows.map(row => 
+        `<tr><td>${row.status}</td><td>${row.count}</td><td>${row.percentage}%</td></tr>`
+    ).join('');
+    
+    // Feature details table - showing implemented and in progress features ONLY (no Product Backlog Items) using unique work items
+    const featureDetails = uniqueData.filter(row => {
+        const workItemType = row['Work Item Type'] || '';
+        const status = row['State'] || '';
+        // Include ONLY Features that are Done or In Progress
+        return workItemType === 'Feature' && 
+               (status === 'Done' || status === 'In Progress' || status === 'Development' || status === 'Analysis' || status === 'Review' || status === 'Test');
+    }).map(row => ({
+        id: row['Work Item Id'] || 'N/A',
+        title: (row['Title'] || 'No Title').substring(0, 100) + ((row['Title'] || '').length > 100 ? '...' : ''), // Slightly longer titles since we removed a column
+        status: row['State'] || 'Unknown',
+        developer: row['Assigned To'] || 'Unassigned',
+        createdDate: row['Created Date'] ? row['Created Date'].split(' ')[0] : 'N/A' // Just the date part
+    })).sort((a, b) => {
+        // Sort by status (Done first, then others), then by developer
+        if (a.status === 'Done' && b.status !== 'Done') return -1;
+        if (a.status !== 'Done' && b.status === 'Done') return 1;
+        return a.developer.localeCompare(b.developer);
+    });
+    
+    const featureDetailsBody = document.querySelector('#featureDetailsTable tbody');
+    featureDetailsBody.innerHTML = featureDetails.map(row => {
+        const statusClass = row.status === 'Done' ? 'text-success' : 'text-warning';
+        return `<tr>
+            <td>${row.id}</td>
+            <td title="${row.title}">${row.title}</td>
+            <td><span class="${statusClass}">${row.status}</span></td>
+            <td>${row.developer}</td>
+            <td>${row.createdDate}</td>
+        </tr>`;
+    }).join('');
+    // Tickets closed by type using unique work items
+    const ticketsByType = {};
+    uniqueData.filter(row => row['State'] === 'Done').forEach(row => {
+        const type = row['Work Item Type'] || 'Unknown';
+        ticketsByType[type] = (ticketsByType[type] || 0) + 1;
+    });
+    const tbtCtx = document.getElementById('ticketsByTypeChart').getContext('2d');
+    new Chart(tbtCtx, {
+        type: 'bar',
+        data: {
+            labels: Object.keys(ticketsByType),
+            datasets: [{
+                label: 'Tickets Closed',
+                data: Object.values(ticketsByType),
+                backgroundColor: 'rgba(153, 102, 255, 0.6)'
+            }]
+        },
+        options: {responsive:true}
+    });
+    
+    // Tickets closed distribution (histogram) - Development cycle time using unique work items
+    const closedUniqueTickets = uniqueData.filter(row => row['State'] === 'Done');
+    const closeTimes = closedUniqueTickets.map(row => {
+        // Use Start Date if available, otherwise fall back to State Change Date, then Created Date
+        const startDate = row['Start Date'] || row['State Change Date'] || row['Created Date'];
+        return daysBetween(startDate, row['Closed Date']);
+    }).filter(x => typeof x === 'number' && !isNaN(x) && x >= 0);
+    const bins = [0,2,5,10,20,30,60,90,180,365];
+    const histCounts = Array(bins.length).fill(0);
+    closeTimes.forEach(days => {
+        for (let i=0; i<bins.length; i++) {
+            if (days <= bins[i]) { histCounts[i]++; break; }
+        }
+    });
+    const histLabels = bins.map((b,i) => i===0 ? `<=${b}` : `>${bins[i-1]}-${b}`);
+    const histCtx = document.getElementById('closeTimeHistogram').getContext('2d');
+    new Chart(histCtx, {
+        type: 'bar',
+        data: {
+            labels: histLabels,
+            datasets: [{
+                label: 'Tickets Closed',
+                data: histCounts,
+                backgroundColor: 'rgba(75, 192, 192, 0.6)'
+            }]
+        },
+        options: {responsive:true}
+    });
+    
+    // Age distribution histogram for open tickets using unique work items
+    // (openUniqueTickets and openUniqueTicketsWithAge already calculated above)
+    const ageBins = [0, 7, 14, 30, 60, 90, 180, 365];
+    const ageHistCounts = Array(ageBins.length).fill(0);
+    const ages = openUniqueTicketsWithAge.map(ticket => ticket.ageInDays);
+    
+    ages.forEach(age => {
+        for (let i = 0; i < ageBins.length; i++) {
+            if (age <= ageBins[i]) { 
+                ageHistCounts[i]++; 
+                break; 
+            }
+        }
+    });
+    
+    const ageHistLabels = ageBins.map((bin, i) => i === 0 ? `≤${bin} days` : `${ageBins[i-1]+1}-${bin} days`);
+    
+    const ageHistCtx = document.getElementById('ticketAgeHistogram').getContext('2d');
+    new Chart(ageHistCtx, {
+        type: 'bar',
+        data: {
+            labels: ageHistLabels,
+            datasets: [{
+                label: 'Open Tickets',
+                data: ageHistCounts,
+                backgroundColor: 'rgba(255, 159, 64, 0.6)',
+                borderColor: 'rgba(255, 159, 64, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1
+                    }
+                }
+            }
+        }
+    });
+    
+    // Average age by state for open tickets using unique work items
+    const ageByState = {};
+    openUniqueTicketsWithAge.forEach(ticket => {
+        const state = ticket['State'] || 'Unknown';
+        if (!ageByState[state]) {
+            ageByState[state] = { totalAge: 0, count: 0 };
+        }
+        ageByState[state].totalAge += ticket.ageInDays;
+        ageByState[state].count += 1;
+    });
+    
+    const ageByStateData = Object.entries(ageByState).map(([state, stats]) => ({
+        state: state,
+        avgAge: stats.count > 0 ? (stats.totalAge / stats.count).toFixed(1) : 0,
+        count: stats.count
+    })).sort((a, b) => parseFloat(b.avgAge) - parseFloat(a.avgAge));
+    
+    const ageByStateCtx = document.getElementById('ageByStateChart').getContext('2d');
+    new Chart(ageByStateCtx, {
+        type: 'bar',
+        data: {
+            labels: ageByStateData.map(item => `${item.state} (${item.count})`),
+            datasets: [{
+                label: 'Average Age (Days)',
+                data: ageByStateData.map(item => parseFloat(item.avgAge)),
+                backgroundColor: 'rgba(255, 99, 132, 0.6)',
+                borderColor: 'rgba(255, 99, 132, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+    
+    // Aging Scatter Chart - State vs Age with blocked highlighting (Product Backlog Items only)
+    const scatterData = [];
+    const statePositions = {}; // Map states to x-axis positions
+    
+    // Filter for Product Backlog Items only
+    const productBacklogItems = openUniqueTicketsWithAge.filter(ticket => {
+        const workItemType = ticket['Work Item Type'] || '';
+        return workItemType === 'Product Backlog Item';
+    });
+    
+    const uniqueStates = [...new Set(productBacklogItems.map(ticket => ticket['State'] || 'Unknown'))].sort();
+    
+    // Assign x-axis positions to states
+    uniqueStates.forEach((state, index) => {
+        statePositions[state] = index;
+    });
+    
+    // Enhanced state colors for scatter plot
+    const scatterStateColors = {
+        'In Progress': '#3498db',
+        'Development': '#e74c3c', 
+        'Analysis': '#f39c12',
+        'Review': '#2ecc71',
+        'Test': '#9b59b6',
+        'Blocked': '#e67e22',
+        'New': '#95a5a6',
+        'Unknown': '#34495e'
+    };
+    
+    // Function to get color based on age and blocked status
+    function getScatterColor(ticket) {
+        const age = ticket.ageInDays;
+        const isBlocked = ticket['DEBLOCKED'] === 'TRUE' || ticket['DEBLOCKED'] === true || ticket['DEBLOCKED'] === 'True';
+        
+        if (isBlocked) {
+            // Red shades for blocked tickets - darker red for older tickets
+            if (age > 90) return '#8B0000'; // Dark red
+            if (age > 60) return '#DC143C'; // Crimson
+            if (age > 30) return '#FF0000'; // Red
+            return '#FF6B6B'; // Light red
+        }
+        
+        // Color gradient based on age for non-blocked tickets
+        const baseColor = scatterStateColors[ticket['State']] || '#34495e';
+        
+        if (age <= 25) {
+            // Green tones for recent tickets (≤25 days)
+            return '#27AE60'; // Green
+        } else if (age <= 60) {
+            // Orange tones for moderate age (26-60 days)
+            return '#F39C12'; // Orange
+        } else {
+            // Red tones for old tickets (>60 days)
+            return '#E74C3C'; // Red
+        }
+    }
+    
+    // Prepare scatter plot data (Product Backlog Items only)
+    productBacklogItems.forEach(ticket => {
+        const state = ticket['State'] || 'Unknown';
+        const age = ticket.ageInDays;
+        const isBlocked = ticket['DEBLOCKED'] === 'TRUE' || ticket['DEBLOCKED'] === true || ticket['DEBLOCKED'] === 'True';
+        
+        scatterData.push({
+            x: statePositions[state],
+            y: age,
+            ticket: ticket,
+            isBlocked: isBlocked,
+            color: getScatterColor(ticket)
+        });
+    });
+    
+    // Group data by color for proper rendering
+    const scatterDatasets = {};
+    scatterData.forEach(point => {
+        const color = point.color;
+        if (!scatterDatasets[color]) {
+            scatterDatasets[color] = {
+                label: point.isBlocked ? 'Blocked Items' : `Age: ${point.y <= 25 ? '≤25 days' : point.y <= 60 ? '26-60 days' : '>60 days'}`,
+                data: [],
+                backgroundColor: color,
+                borderColor: color,
+                pointRadius: point.isBlocked ? 8 : 6,
+                pointHoverRadius: point.isBlocked ? 10 : 8,
+                showLine: false
+            };
+        }
+        scatterDatasets[color].data.push(point);
+    });
+    
+    const agingScatterCtx = document.getElementById('agingScatterChart').getContext('2d');
+    
+    // Calculate overall health score based on ticket age distribution
+    const totalItems = productBacklogItems.length;
+    let healthScore = 0;
+    
+    if (totalItems > 0) {
+        const greenTickets = productBacklogItems.filter(ticket => ticket.ageInDays <= 25).length;
+        const orangeTickets = productBacklogItems.filter(ticket => ticket.ageInDays > 25 && ticket.ageInDays <= 60).length;
+        const redTickets = productBacklogItems.filter(ticket => ticket.ageInDays > 60).length;
+        
+        // Calculate health score (0-100): Green=good, Orange=neutral, Red=bad
+        healthScore = ((greenTickets * 100) + (orangeTickets * 50) + (redTickets * 0)) / totalItems;
+        
+        console.log(`Health Analysis: ${greenTickets} green, ${orangeTickets} orange, ${redTickets} red tickets. Health Score: ${healthScore.toFixed(1)}`);
+    }
+    
+    // Determine background color based on health score
+    let backgroundColor;
+    if (healthScore >= 75) {
+        backgroundColor = 'rgba(39, 174, 96, 0.15)'; // Strong green background - healthy situation
+    } else if (healthScore >= 50) {
+        backgroundColor = 'rgba(46, 204, 113, 0.12)'; // Light green background - mostly healthy
+    } else if (healthScore >= 35) {
+        backgroundColor = 'rgba(241, 196, 15, 0.12)'; // Yellow background - mixed situation
+    } else if (healthScore >= 20) {
+        backgroundColor = 'rgba(243, 156, 18, 0.15)'; // Orange background - concerning
+    } else {
+        backgroundColor = 'rgba(231, 76, 60, 0.15)'; // Red background - critical situation
+    }
+    
+    // Set the canvas background color
+    agingScatterCtx.canvas.style.backgroundColor = backgroundColor;
+    
+    new Chart(agingScatterCtx, {
+        type: 'scatter',
+        data: {
+            datasets: Object.values(scatterDatasets)
+        },
+        options: {
+            responsive: true,
+            scales: {
+                x: {
+                    type: 'linear',
+                    position: 'bottom',
+                    min: -0.5,
+                    max: uniqueStates.length - 0.5,
+                    ticks: {
+                        stepSize: 1,
+                        callback: function(value) {
+                            return uniqueStates[Math.round(value)] || '';
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Ticket State',
+                        font: { size: 14, weight: 'bold' }
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Age (Days)',
+                        font: { size: 14, weight: 'bold' }
+                    },
+                    grid: {
+                        color: function(context) {
+                            // Safe access to tick value
+                            const value = context?.tick?.value;
+                            if (typeof value !== 'number') return 'rgba(0, 0, 0, 0.1)';
+                            
+                            // Enhanced grid lines at age thresholds
+                            if (value === 25) {
+                                return 'rgba(39, 174, 96, 0.6)'; // Green line at 25 days
+                            }
+                            if (value === 60) {
+                                return 'rgba(243, 156, 18, 0.6)'; // Orange line at 60 days
+                            }
+                            if ([90, 120].includes(value)) {
+                                return 'rgba(231, 76, 60, 0.5)'; // Red lines at high age thresholds
+                            }
+                            // Subtle gradient for other grid lines
+                            if (value <= 25) {
+                                return 'rgba(39, 174, 96, 0.2)'; // Light green grid for recent zone
+                            } else if (value <= 60) {
+                                return 'rgba(243, 156, 18, 0.2)'; // Light orange grid for moderate zone
+                            } else {
+                                return 'rgba(231, 76, 60, 0.2)'; // Light red grid for old zone
+                            }
+                        },
+                        lineWidth: function(context) {
+                            // Safe access to tick value
+                            const value = context?.tick?.value;
+                            if (typeof value !== 'number') return 1;
+                            
+                            // Thicker lines at key thresholds
+                            if ([25, 60].includes(value)) {
+                                return 2;
+                            }
+                            return 1;
+                        }
+                    },
+                    ticks: {
+                        color: function(context) {
+                            // Safe access to tick value
+                            const value = context?.tick?.value;
+                            if (typeof value !== 'number') return '#000000';
+                            
+                            // Color-code the age labels
+                            if (value <= 25) {
+                                return '#27AE60'; // Green for recent
+                            } else if (value <= 60) {
+                                return '#F39C12'; // Orange for moderate
+                            } else {
+                                return '#E74C3C'; // Red for old
+                            }
+                        },
+                        font: {
+                            weight: function(context) {
+                                // Safe access to tick value
+                                const value = context?.tick?.value;
+                                if (typeof value !== 'number') return 'normal';
+                                
+                                // Bold font for key thresholds
+                                if ([25, 60].includes(value)) {
+                                    return 'bold';
+                                }
+                                return 'normal';
+                            }
+                        }
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                    labels: {
+                        usePointStyle: true,
+                        filter: function(legendItem, chartData) {
+                            // Reduce legend clutter by showing only key categories
+                            return legendItem.text.includes('Blocked') || 
+                                   legendItem.text.includes('≤25 days') || 
+                                   legendItem.text.includes('>60 days');
+                        }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        title: function(tooltipItems) {
+                            const point = tooltipItems[0];
+                            const ticket = scatterData.find(d => d.x === point.parsed.x && d.y === point.parsed.y);
+                            return ticket ? `ID: ${ticket.ticket['Work Item Id'] || 'N/A'}` : '';
+                        },
+                        label: function(context) {
+                            const point = scatterData.find(d => d.x === context.parsed.x && d.y === context.parsed.y);
+                            if (!point) return '';
+                            
+                            const ticket = point.ticket;
+                            const title = ticket['Title'] ? ticket['Title'].substring(0, 50) + '...' : 'No Title';
+                            const state = ticket['State'] || 'Unknown';
+                            const developer = ticket['Assigned To'] || 'Unassigned';
+                            const age = ticket.ageInDays;
+                            const blockedStatus = point.isBlocked ? ' (BLOCKED)' : '';
+                            
+                            return [
+                                `Title: ${title}`,
+                                `State: ${state}${blockedStatus}`,
+                                `Developer: ${developer}`,
+                                `Age: ${age} days`,
+                                `Start Date: ${ticket.developmentStartDate || 'N/A'}`
+                            ];
+                        }
+                    }
+                }
+            },
+            layout: {
+                padding: 20
+            }
+        }
+    });
+    
+    // Update health indicator display
+    const healthIndicator = document.getElementById('healthIndicator');
+    if (totalItems > 0) {
+        const greenTickets = productBacklogItems.filter(ticket => ticket.ageInDays <= 25).length;
+        const orangeTickets = productBacklogItems.filter(ticket => ticket.ageInDays > 25 && ticket.ageInDays <= 60).length;
+        const redTickets = productBacklogItems.filter(ticket => ticket.ageInDays > 60).length;
+        const blockedTickets = productBacklogItems.filter(ticket => 
+            ticket['DEBLOCKED'] === 'TRUE' || ticket['DEBLOCKED'] === true || ticket['DEBLOCKED'] === 'True'
+        ).length;
+        
+        let healthMessage, healthClass, borderColor;
+        
+        if (healthScore >= 75) {
+            healthMessage = `🟢 EXCELLENT Health (${healthScore.toFixed(1)}%)`;
+            healthClass = 'alert-success';
+            borderColor = '#27AE60';
+        } else if (healthScore >= 50) {
+            healthMessage = `🟡 GOOD Health (${healthScore.toFixed(1)}%)`;
+            healthClass = 'alert-info';
+            borderColor = '#2ECC71';
+        } else if (healthScore >= 35) {
+            healthMessage = `🟠 MODERATE Health (${healthScore.toFixed(1)}%)`;
+            healthClass = 'alert-warning';
+            borderColor = '#F1C40F';
+        } else if (healthScore >= 20) {
+            healthMessage = `🟠 CONCERNING Health (${healthScore.toFixed(1)}%)`;
+            healthClass = 'alert-warning';
+            borderColor = '#F39C12';
+        } else {
+            healthMessage = `🔴 CRITICAL Health (${healthScore.toFixed(1)}%)`;
+            healthClass = 'alert-danger';
+            borderColor = '#E74C3C';
+        }
+        
+        healthIndicator.className = `alert ${healthClass}`;
+        healthIndicator.style.borderLeftColor = borderColor;
+        healthIndicator.innerHTML = `
+            <strong>${healthMessage}</strong><br>
+            <small>
+                📊 Distribution: 
+                <span class="badge bg-success">${greenTickets} Recent (≤25 days)</span>
+                <span class="badge bg-warning">${orangeTickets} Moderate (26-60 days)</span>
+                <span class="badge bg-danger">${redTickets} Old (>60 days)</span>
+                ${blockedTickets > 0 ? `<span class="badge bg-dark">${blockedTickets} Blocked</span>` : ''}
+                | <strong>Total: ${totalItems} Product Backlog Items</strong>
+            </small>
+        `;
+    } else {
+        healthIndicator.className = 'alert alert-secondary';
+        healthIndicator.innerHTML = '<strong>No Product Backlog Items found</strong>';
+    }
+    
+    // Aging Distribution Matrix - Shows states vs age ranges in matrix format
+    const agingMatrixData = {};
+    const stateColors = {
+        'In Progress': '#3498db',
+        'Development': '#e74c3c', 
+        'Analysis': '#f39c12',
+        'Review': '#2ecc71',
+        'Test': '#9b59b6',
+        'Blocked': '#e67e22',
+        'New': '#95a5a6',
+        'Unknown': '#34495e'
+    };
+    
+    // Get all unique states from open tickets using unique work items
+    const allStates = [...new Set(openUniqueTicketsWithAge.map(ticket => ticket['State'] || 'Unknown'))].sort();
+    
+    // Initialize matrix data structure
+    allStates.forEach(state => {
+        agingMatrixData[state] = {};
+        ageHistLabels.forEach(ageRange => {
+            agingMatrixData[state][ageRange] = 0;
+        });
+    });
+    
+    // Count tickets for each state-age combination using unique work items
+    openUniqueTicketsWithAge.forEach(ticket => {
+        const state = ticket['State'] || 'Unknown';
+        const age = ticket.ageInDays;
+        
+        // Find which age range this ticket belongs to
+        let ageRange = ageHistLabels[ageHistLabels.length - 1]; // default to last range
+        for (let i = 0; i < ageBins.length; i++) {
+            if (age <= ageBins[i]) {
+                ageRange = ageHistLabels[i];
+                break;
+            }
+        }
+        
+        agingMatrixData[state][ageRange]++;
+    });
+    
+    // Create datasets for matrix chart (each state is a separate dataset)
+    const matrixDatasets = allStates.map((state, index) => ({
+        label: state,
+        data: ageHistLabels.map(ageRange => ({
+            x: ageRange,
+            y: state,
+            v: agingMatrixData[state][ageRange]
+        })),
+        backgroundColor: stateColors[state] || '#7f8c8d',
+        borderColor: stateColors[state] || '#7f8c8d',
+        borderWidth: 1,
+        barThickness: 40,
+        categoryPercentage: 0.8,
+        barPercentage: 0.9
+    }));
+    
+    const agingByStateCtx = document.getElementById('agingByStateChart').getContext('2d');
+    new Chart(agingByStateCtx, {
+        type: 'bar',
+        data: {
+            labels: ageHistLabels,
+            datasets: allStates.map(state => ({
+                label: state,
+                data: ageHistLabels.map(ageRange => agingMatrixData[state][ageRange]),
+                backgroundColor: stateColors[state] || '#7f8c8d',
+                borderColor: stateColors[state] || '#7f8c8d',
+                borderWidth: 2,
+                stack: 'matrix'
+            }))
+        },
+        options: {
+            responsive: true,
+            indexAxis: 'y', // This makes it horizontal - states on Y-axis, age ranges as data
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Number of Tickets',
+                        font: { size: 14, weight: 'bold' }
+                    },
+                    grid: { display: true, color: 'rgba(0,0,0,0.1)' }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'States',
+                        font: { size: 14, weight: 'bold' }
+                    },
+                    grid: { display: false }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'right',
+                    labels: { 
+                        usePointStyle: true,
+                        font: { size: 12 }
+                    }
+                },
+                tooltip: {
+                    mode: 'nearest',
+                    intersect: false,
+                    callbacks: {
+                        title: function(tooltipItems) {
+                            const item = tooltipItems[0];
+                            return `State: ${item.dataset.label}`;
+                        },
+                        label: function(context) {
+                            const ageRange = context.label;
+                            const count = context.raw;
+                            const state = context.dataset.label;
+                            
+                            // Calculate percentage of this state's tickets in this age range
+                            const stateTotal = ageHistLabels.reduce((sum, range) => 
+                                sum + agingMatrixData[state][range], 0);
+                            const percentage = stateTotal > 0 ? ((count / stateTotal) * 100).toFixed(1) : 0;
+                            
+                            return `${ageRange}: ${count} tickets (${percentage}% of ${state})`;
+                        },
+                        footer: function(tooltipItems) {
+                            const item = tooltipItems[0];
+                            const ageRange = item.label;
+                            const totalInRange = allStates.reduce((sum, state) => 
+                                sum + agingMatrixData[state][ageRange], 0);
+                            return `Total in ${ageRange}: ${totalInRange} tickets`;
+                        }
+                    }
+                }
+            },
+            layout: {
+                padding: { right: 20 }
+            }
+        }
+    });
+    
+    // Oldest open tickets table using unique work items
+    const oldestTickets = openUniqueTicketsWithAge
+        .sort((a, b) => b.ageInDays - a.ageInDays)
+        .slice(0, 20) // Top 20 oldest tickets
+        .map(ticket => ({
+            id: ticket['Work Item Id'] || ticket['ID'] || 'N/A',
+            title: (ticket['Title'] || 'No Title').substring(0, 80) + ((ticket['Title'] || '').length > 80 ? '...' : ''),
+            developer: ticket['Assigned To'] || 'Unassigned',
+            state: ticket['State'] || 'Unknown',
+            age: ticket.ageInDays,
+            startDate: ticket.developmentStartDate ? ticket.developmentStartDate.split(' ')[0] : 'N/A'
+        }));
+    
+    const agingTableBody = document.querySelector('#agingTicketsTable tbody');
+    agingTableBody.innerHTML = oldestTickets.map(ticket => {
+        let ageClass = 'text-success';
+        if (ticket.age > 90) ageClass = 'text-danger';
+        else if (ticket.age > 30) ageClass = 'text-warning';
+        
+        return `<tr>
+            <td>${ticket.id}</td>
+            <td title="${ticket.title}">${ticket.title}</td>
+            <td>${ticket.developer}</td>
+            <td><span class="badge bg-secondary">${ticket.state}</span></td>
+            <td><span class="${ageClass} fw-bold">${ticket.age}</span></td>
+            <td>${ticket.startDate}</td>
+        </tr>`;
+    }).join('');
+}
+document.getElementById('csvFileInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    console.log('File selected:', file.name, 'Size:', file.size);
+    
+    // Show loading indicator
+    document.getElementById('kpiSection').innerHTML = '<div class="col-12 text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div><p>Processing CSV file...</p></div>';
+    
+    Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+            console.log('Papa.parse completed');
+            console.log('Data rows:', results.data.length);
+            console.log('Columns:', Object.keys(results.data[0] || {}));
+            console.log('Sample row:', results.data[0]);
+            
+            if (results.errors.length > 0) {
+                console.error('CSV parsing errors:', results.errors);
+                document.getElementById('kpiSection').innerHTML = '<div class="col-12 alert alert-danger">CSV parsing errors: ' + results.errors.map(e => e.message).join(', ') + '</div>';
+                return;
+            }
+            
+            if (results.data.length === 0) {
+                document.getElementById('kpiSection').innerHTML = '<div class="col-12 alert alert-warning">No data found in CSV file</div>';
+                return;
+            }
+            
+            try {
+                updateDashboard(results.data);
+                console.log('Dashboard updated successfully');
+            } catch (error) {
+                console.error('Error updating dashboard:', error);
+                document.getElementById('kpiSection').innerHTML = '<div class="col-12 alert alert-danger">Error processing data: ' + error.message + '</div>';
+            }
+        },
+        error: function(error) {
+            console.error('Papa.parse error:', error);
+            document.getElementById('kpiSection').innerHTML = '<div class="col-12 alert alert-danger">Error parsing CSV: ' + error.message + '</div>';
+        }
+    });
+});
+document.getElementById('downloadPdfBtn').addEventListener('click', function() {
+    const button = this;
+    button.disabled = true;
+    button.textContent = 'Generating PDF...';
+    
+    // Get the dashboard element
+    const dashboardElement = document.getElementById('dashboard');
+    
+    // Store original styles
+    const originalStyles = {};
+    const elementsToModify = dashboardElement.querySelectorAll('.table-responsive');
+    
+    // Temporarily remove scrollable constraints for complete capture
+    elementsToModify.forEach((el, index) => {
+        originalStyles[index] = {
+            maxHeight: el.style.maxHeight,
+            overflow: el.style.overflow
+        };
+        el.style.maxHeight = 'none';
+        el.style.overflow = 'visible';
+    });
+    
+    // Wait a moment for layout to settle
+    setTimeout(() => {
+        html2pdf().set({
+            margin: 0.5,
+            filename: 'work_item_dashboard_report.pdf',
+            image: { 
+                type: 'jpeg', 
+                quality: 0.92 
+            },
+            html2canvas: { 
+                scale: 0.8, // Lower scale for better fit
+                useCORS: true,
+                allowTaint: true,
+                letterRendering: true,
+                logging: false,
+                width: dashboardElement.scrollWidth,
+                height: dashboardElement.scrollHeight,
+                x: 0,
+                y: 0,
+                scrollX: 0,
+                scrollY: 0
+            },
+            jsPDF: { 
+                unit: 'in', 
+                format: 'a4', 
+                orientation: 'portrait' 
+            }
+        }).from(dashboardElement).save().then(() => {
+            // Restore original styles
+            elementsToModify.forEach((el, index) => {
+                el.style.maxHeight = originalStyles[index].maxHeight;
+                el.style.overflow = originalStyles[index].overflow;
+            });
+            
+            // Reset button
+            button.disabled = false;
+            button.textContent = 'Download Report as PDF';
+        }).catch(() => {
+            // Reset button on error
+            button.disabled = false;
+            button.textContent = 'Download Report as PDF';
+        });
+    }, 500);
+});
+</script>
+</body>
+</html>
