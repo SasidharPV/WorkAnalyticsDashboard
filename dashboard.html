@@ -184,7 +184,7 @@
     
     <div class="dashboard-section">
         <h3>Monthly Developer Performance Heatmap</h3>
-        <div class="chart-container">
+    <div class="chart-container" style="min-height: 620px;">
             <canvas id="developerHeatmapChart"></canvas>
         </div>
     </div>
@@ -888,8 +888,8 @@ function updateDashboard(data) {
                 monthlyDeveloperData[month][developer] : 0;
             
             heatmapData.push({
-                x: monthIndex, // Month index for X-axis
-                y: devIndex,   // Developer index for Y-axis
+                x: devIndex,   // Developer index on X-axis
+                y: monthIndex, // Month index on Y-axis
                 v: value
             });
         });
@@ -900,7 +900,19 @@ function updateDashboard(data) {
     
     // Create custom heatmap using scatter plot with sized points
     const developerHeatmapCtx = document.getElementById('developerHeatmapChart').getContext('2d');
-    
+
+    // Measure longest month label to compute dynamic right padding and avoid crossing with axis title
+    developerHeatmapCtx.save();
+    developerHeatmapCtx.font = 'bold 13px Arial';
+    const maxMonthLabelWidth = sortedMonths.length
+        ? Math.max(...sortedMonths.map(m => developerHeatmapCtx.measureText(String(m)).width))
+        : 0;
+    developerHeatmapCtx.restore();
+    const rightLabelOffset = 12; // space from chart area to month labels
+    const titleGap = 24;         // gap between month labels and rotated axis title
+    const monthsTitleOffset = rightLabelOffset + maxMonthLabelWidth + titleGap; // used by plugin
+    const dynamicRightPadding = Math.ceil(monthsTitleOffset + 40); // ensure title has breathing room
+
     // Function to get color based on value
     function getHeatmapColor(value, maxValue) {
         if (value === 0) return 'rgba(255, 152, 0, 0.9)'; // Orange for 0
@@ -937,12 +949,17 @@ function updateDashboard(data) {
             events: ['mousemove','mouseout','click','touchstart','touchmove','touchend'],
             interaction: { intersect: false, mode: 'nearest' },
             hover: { mode: 'nearest', intersect: false, animationDuration: 0 },
+            layout: {
+                // Right padding is dynamic to prevent the rotated 'Months' title from overlapping month labels
+                padding: { left: 80, right: dynamicRightPadding, top: 60, bottom: 160 }
+            },
             plugins: {
                 title: {
                     display: true,
                     text: 'Monthly PBI Closure Heatmap by Developer',
                     font: { size: 16, weight: 'bold' },
-                    color: '#2C3E50'
+                    color: '#2C3E50',
+                    padding: { top: 8, bottom: 12 }
                 },
                 legend: { display: false },
                 tooltip: {
@@ -950,8 +967,8 @@ function updateDashboard(data) {
                     callbacks: {
                         title: function(context) {
                             const point = context[0];
-                            const monthIndex = Math.round(point.parsed.x);
-                            const devIndex = Math.round(point.parsed.y);
+                            const devIndex = Math.round(point.parsed.x);
+                            const monthIndex = Math.round(point.parsed.y);
                             const month = sortedMonths[monthIndex] || 'Unknown';
                             const developer = sortedDevelopers[devIndex] || 'Unknown';
                             return `${developer} - ${month}`;
@@ -965,39 +982,17 @@ function updateDashboard(data) {
             scales: {
                 x: {
                     type: 'linear',
-                    position: 'bottom',
-                    min: -0.5,
-                    max: sortedMonths.length - 0.5,
-                    title: {
-                        display: true,
-                        text: 'Months',
-                        font: { size: 14, weight: 'bold' },
-                        color: '#2C3E50'
-                    },
-                    ticks: {
-                        stepSize: 1,
-                        align: 'center',
-                        crossAlign: 'center',
-                        callback: function(value) {
-                            const monthIndex = Math.round(value);
-                            return sortedMonths[monthIndex] ? sortedMonths[monthIndex].split(' ')[0] : '';
-                        },
-                        maxRotation: 45,
-                        font: { size: 10 }
-                    },
-                    grid: { display: false }
-                },
-                y: {
-                    type: 'linear',
+                    position: 'top',
                     min: -0.5,
                     max: sortedDevelopers.length - 0.5,
                     title: {
-                        display: true,
+                        display: false,
                         text: 'Developers',
                         font: { size: 14, weight: 'bold' },
                         color: '#2C3E50'
                     },
                     ticks: {
+                        display: false,
                         stepSize: 1,
                         align: 'center',
                         crossAlign: 'center',
@@ -1006,7 +1001,35 @@ function updateDashboard(data) {
                             const fullName = sortedDevelopers[devIndex];
                             return fullName ? fullName.split(' ')[0] : '';
                         },
-                        font: { size: 10 }
+                        maxRotation: 0,
+                        font: { size: 14, weight: 'bold' },
+                        padding: 16
+                    },
+                    grid: { display: false }
+                },
+                y: {
+                    type: 'linear',
+                    min: -0.5,
+                    max: sortedMonths.length - 0.5,
+                    title: {
+                        display: false,
+                        text: 'Months',
+                        font: { size: 14, weight: 'bold' },
+                        color: '#2C3E50'
+                    },
+                    ticks: {
+                        display: false,
+                        stepSize: 1,
+                        align: 'center',
+                        crossAlign: 'center',
+                        callback: function(value) {
+                            const monthIndex = Math.round(value);
+                            const label = sortedMonths[monthIndex];
+                            // Show short month and year
+                            return label ? label : '';
+                        },
+                        font: { size: 13, weight: 'bold' },
+                        padding: 12
                     },
                     grid: { display: false }
                 }
@@ -1029,7 +1052,7 @@ function updateDashboard(data) {
                     heatmapData.forEach((point, index) => {
                         const element = meta.data[index];
                         if (!element) return;
-                        // Compute pixel bounds for the cell, accounting for axis directions
+                        // Compute pixel bounds for the cell (x=developer index, y=month index)
                         const xPix1 = xScale.getPixelForValue(point.x - 0.5);
                         const xPix2 = xScale.getPixelForValue(point.x + 0.5);
                         const yPix1 = yScale.getPixelForValue(point.y - 0.5);
@@ -1041,10 +1064,56 @@ function updateDashboard(data) {
                         const width = right - left;
                         const height = bottom - top;
                         if (width <= 0 || height <= 0) return;
-                        const pad = 0; // 0 to fill completely; increase for thin gaps
+                        // Fill the entire cell (touching edges) for a fully colored heatmap
                         ctx.fillStyle = getHeatmapColor(point.v, maxValue);
-                        ctx.fillRect(left + pad, top + pad, width - pad*2, height - pad*2);
+                        ctx.fillRect(left, top, width, height);
                     });
+                    ctx.restore();
+                }
+            },
+            // Draw centered developer labels (bottom) and month labels (right)
+            {
+                id: 'heatmapAxisLabels',
+                afterDatasetsDraw(chart) {
+                    const { ctx, chartArea, scales } = chart;
+                    const xScale = scales.x;
+                    const yScale = scales.y;
+                    ctx.save();
+                    // Developers on bottom, centered per column
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    ctx.font = 'bold 14px Arial';
+                    ctx.fillStyle = '#2C3E50';
+                    for (let i = 0; i < sortedDevelopers.length; i++) {
+                        const x = xScale.getPixelForValue(i);
+                        const name = (sortedDevelopers[i] || '').split(' ')[0] || '';
+                        ctx.fillText(name, x, chartArea.bottom + 8);
+                    }
+                    // Months on right, centered per row
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'middle';
+                    ctx.font = 'bold 13px Arial';
+                    for (let j = 0; j < sortedMonths.length; j++) {
+                        const y = yScale.getPixelForValue(j);
+                        const label = sortedMonths[j] || '';
+                        // Draw month labels with a fixed offset from the chart area
+                        ctx.fillText(label, chartArea.right + rightLabelOffset, y);
+                    }
+                    // Custom axis titles
+                    // Bottom title (Developers)
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    ctx.font = 'bold 16px Arial';
+                    ctx.fillText('Developers', chartArea.left + chartArea.width / 2, chartArea.bottom + 40);
+                    // Right title (Months)
+                    ctx.save();
+                    // Place rotated title to the right of the longest month label to avoid crossing
+                    ctx.translate(chartArea.right + monthsTitleOffset, chartArea.top + chartArea.height / 2);
+                    ctx.rotate(Math.PI / 2);
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('Months', 0, 0);
+                    ctx.restore();
                     ctx.restore();
                 }
             },
@@ -1057,7 +1126,7 @@ function updateDashboard(data) {
                     ctx.save();
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.font = 'bold 14px Arial';
+                    ctx.font = 'bold 15px Arial';
                     heatmapData.forEach((point, index) => {
                         const element = meta.data[index];
                         if (!element) return;
