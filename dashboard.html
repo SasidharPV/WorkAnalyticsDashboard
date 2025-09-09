@@ -7,50 +7,24 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script>
-        // Simple Chart.js configuration check
-        console.log('Chart.js loading...');
-        
         // Ensure Chart.js defaults don't disable tooltips
         if (typeof Chart !== 'undefined') {
-            // Keep defaults simple; configure interaction at chart level
             Chart.defaults.plugins.tooltip = Chart.defaults.plugins.tooltip || {};
             Chart.defaults.plugins.tooltip.enabled = true;
             Chart.defaults.interaction = Chart.defaults.interaction || {};
             Chart.defaults.interaction.intersect = false;
             Chart.defaults.interaction.mode = 'nearest';
-            // Ensure default events are set (hover/click/touch)
             Chart.defaults.events = ['mousemove','mouseout','click','touchstart','touchmove','touchend'];
-            console.log('Chart.js defaults configured for tooltips');
         }
 
-        // Helper to guard tooltip callbacks from errors that can break hover globally
+        // Helper to guard tooltip callbacks from errors
         function safe(cb, fallback) {
             return function() {
                 try { return cb.apply(this, arguments); }
                 catch (err) { console.error('Tooltip callback error:', err); return fallback; }
             };
         }
-        
-        // Add debugging after page loads
-        window.addEventListener('load', function() {
-            console.log('=== TOOLTIP DEBUG ===');
-            console.log('Chart.js version:', Chart?.version);
-            console.log('Charts on page:', Chart?.instances?.length || 'Unknown');
-            
-            // Check if any chart elements exist
-            const canvases = document.querySelectorAll('canvas');
-            console.log('Canvas elements found:', canvases.length);
-            
-            // Check Chart instances
-            if (Chart.instances) {
-                Chart.instances.forEach((instance, index) => {
-                    console.log(`Chart ${index}:`, instance.config.type, 'Tooltip enabled:', instance.options?.plugins?.tooltip?.enabled);
-                });
-            }
-            console.log('==================');
-        });
     </script>
     <style>
         body { background: #f8f9fa; }
@@ -66,35 +40,18 @@
         }
         .kpi { font-size: 1.5rem; font-weight: bold; }
         .table-responsive { max-height: 400px; overflow-y: auto; }
+        .border-left-warning { border-left: 4px solid #f39c12; }
         
-        /* PDF-specific styles */
+        /* Print styles for browser printing */
         @media print {
-            body { 
-                background: white !important; 
-                font-size: 12px;
-                line-height: 1.3;
-            }
-            .dashboard-section { 
-                margin-bottom: 1.5rem; 
-                page-break-inside: avoid;
-            }
-            .chart-container { 
-                min-height: 280px; 
-                max-height: 320px;
-                page-break-inside: avoid;
-            }
-            .table-responsive { 
-                max-height: none; 
-                overflow: visible;
-                page-break-inside: avoid;
-            }
+            body { background: white !important; font-size: 12px; }
+            .dashboard-section { margin-bottom: 1.5rem; page-break-inside: avoid; }
+            .chart-container { min-height: 280px; max-height: 320px; page-break-inside: avoid; }
+            .table-responsive { max-height: none; overflow: visible; page-break-inside: avoid; }
             .kpi { font-size: 1.2rem; }
-            .row { margin: 0; }
-            .col-md-6, .col-md-3 { padding: 5px; }
             h1 { font-size: 1.8rem; }
             h3 { font-size: 1.4rem; margin-bottom: 1rem; }
             .table { font-size: 11px; }
-            .btn { display: none; } /* Hide download button in PDF */
         }
     </style>
 </head>
@@ -105,6 +62,16 @@
         <input type="file" id="csvFileInput" accept=".csv" class="form-control">
     </div>
     <div id="kpiSection" class="dashboard-section row text-center"></div>
+    
+    <!-- Blocked Items Summary Section -->
+    <div id="blockedSummarySection" class="dashboard-section" style="display: none;">
+        <div class="alert alert-warning border-left-warning">
+            <h4 class="alert-heading">🚫 Blocked Items Summary</h4>
+            <div class="row" id="blockedSummaryContent">
+                <!-- Content will be populated by JavaScript -->
+            </div>
+        </div>
+    </div>
     
     <div class="dashboard-section row">
         <div class="col-md-6 chart-container">
@@ -125,9 +92,15 @@
 
     <div class="dashboard-section">
         <h3>PBI's by Blocked State</h3>
+        <div class="alert alert-info mb-3">
+            <strong>Note:</strong> Items with <code>DEBLOCKED = TRUE</code> are currently <strong>blocked</strong>. 
+            Items with <code>DEBLOCKED = FALSE</code> are <strong>not blocked</strong>.<br>
+            <strong>Important:</strong> Items with State = "Blocked" are excluded from analysis since we use the DEBLOCKED column for blocking representation.
+            The table below shows blocking status based on the DEBLOCKED column only.
+        </div>
         <div class="table-responsive">
             <table class="table table-striped" id="blockedStateTable">
-                <thead><tr><th>Blocked Status</th><th>Count</th><th>Percentage</th></tr></thead>
+                <thead><tr><th>Blocked Status</th><th>Count</th><th>Percentage</th><th>Avg Age (Blocked Items)</th></tr></thead>
                 <tbody></tbody>
             </table>
         </div>
@@ -163,10 +136,8 @@
                 <div class="alert alert-info">
                     <strong>Product Backlog Items Only:</strong> 
                     <span class="badge bg-danger me-2">Red = Blocked (DEBLOCKED = TRUE)</span>
-                    <span class="badge bg-success me-2">Green = ≤25 days (non-blocked)</span>
-                    <span class="badge bg-info text-dark me-2">Teal = 26–60 days (non-blocked)</span>
-                    <span class="badge bg-secondary me-2">Gray = >60 days (non-blocked)</span>
-                    <br><small>Only Product Backlog Items are shown. Color coding: Red for blocked only; non-blocked are Blue (≤25d), Teal (26–60d), and Gray (>60d).</small>
+                    <span class="badge bg-primary me-2">Blue = Regular Items (DEBLOCKED = FALSE)</span>
+                    <br><small>Only Product Backlog Items are shown. Simple color coding: Red for blocked items, Blue for all other items.</small>
                 </div>
                 <div id="healthIndicator" class="alert" style="border-left: 5px solid; margin-top: 10px;">
                     <!-- Health indicator will be populated by JavaScript -->
@@ -193,6 +164,10 @@
         <h3>Quarterly Closed PBI's & Average State Duration</h3>
         <div class="chart-container">
             <canvas id="quarterlyClosedChart"></canvas>
+        </div>
+        <div class="alert alert-info mt-3">
+            <strong>📊 Blocked Duration Calculation:</strong> The red "Blocked" line shows the actual average number of days that PBI's were blocked (DEBLOCKED = TRUE) during their lifecycle. 
+            This is calculated by counting all historical entries where DEBLOCKED = TRUE for each work item, providing real blocked time data rather than estimates.
         </div>
     </div>
     
@@ -233,10 +208,6 @@
             </table>
         </div>
     </div>
-
-    <div class="text-center mb-4">
-        <button class="btn btn-primary" id="downloadPdfBtn">Download Report as PDF</button>
-    </div>
 </div>
 <script>
 function parseQuarter(dateStr) {
@@ -256,7 +227,6 @@ function parseQuarter(dateStr) {
 }
 function daysBetween(start, end) {
     if (!start || !end) {
-        console.log('daysBetween: Missing dates', { start, end });
         return null;
     }
     
@@ -264,7 +234,6 @@ function daysBetween(start, end) {
     const parseDate = (dateStr) => {
         try {
             const cleanStr = String(dateStr).replace(/\"/g, '').trim();
-            console.log('Parsing date string:', cleanStr);
             
             // Handle different date formats
             let datePart;
@@ -280,14 +249,12 @@ function daysBetween(start, end) {
                 if (parts.length === 3) {
                     const [month, day, year] = parts;
                     const parsedDate = new Date(year, month - 1, day);
-                    console.log('Parsed MM/DD/YYYY:', { month, day, year, result: parsedDate });
                     return parsedDate;
                 }
             }
             
             // Try other formats
             const fallbackDate = new Date(cleanStr);
-            console.log('Fallback date parse:', fallbackDate);
             return fallbackDate;
         } catch (error) {
             console.error('Date parsing error:', error, 'Input:', dateStr);
@@ -298,24 +265,62 @@ function daysBetween(start, end) {
     const s = parseDate(start);
     const e = parseDate(end);
     
-    console.log('Date parsing results:', { start: s, end: e });
-    
     if (!s || !e || isNaN(s) || isNaN(e)) {
-        console.log('Invalid dates after parsing');
         return null;
     }
     
     const diffTime = e - s;
     const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
     
-    console.log('Date difference calculation:', { 
-        startDate: s.toDateString(), 
-        endDate: e.toDateString(), 
-        diffTime, 
-        diffDays 
-    });
-    
     return diffDays;
+}
+
+// Calculate business days between two dates (excluding weekends)
+function businessDaysBetween(startDate, endDate) {
+    if (!startDate || !endDate) return null;
+    
+    const parseDate = (dateStr) => {
+        try {
+            const cleanStr = String(dateStr).replace(/\"/g, '').trim();
+            let datePart;
+            if (cleanStr.includes(' ')) {
+                [datePart] = cleanStr.split(' ');
+            } else {
+                datePart = cleanStr;
+            }
+            
+            if (datePart.includes('/')) {
+                const parts = datePart.split('/');
+                if (parts.length === 3) {
+                    const [month, day, year] = parts;
+                    return new Date(year, month - 1, day);
+                }
+            }
+            return new Date(cleanStr);
+        } catch (error) {
+            console.error('Date parsing error in businessDaysBetween:', error);
+            return null;
+        }
+    };
+    
+    const start = parseDate(startDate);
+    const end = parseDate(endDate);
+    
+    if (!start || !end || isNaN(start) || isNaN(end)) return null;
+    
+    let businessDays = 0;
+    const current = new Date(start);
+    
+    while (current <= end) {
+        const dayOfWeek = current.getDay();
+        // 0 = Sunday, 6 = Saturday
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+            businessDays++;
+        }
+        current.setDate(current.getDate() + 1);
+    }
+    
+    return Math.max(0, businessDays - 1); // Subtract 1 to exclude the start date
 }
 function groupBy(arr, keyFn) {
     return arr.reduce((acc, item) => {
@@ -326,8 +331,6 @@ function groupBy(arr, keyFn) {
     }, {});
 }
 function updateDashboard(data) {
-    console.log('updateDashboard called with', data.length, 'rows');
-    
     // Current date for comparison
     const today = new Date();
     const todayStr = today.toLocaleDateString('en-GB'); // DD/MM/YYYY format
@@ -345,7 +348,6 @@ function updateDashboard(data) {
                     // Assume MM/DD/YYYY format based on temp2.csv
                     const [month, day, year] = parts;
                     const parsedDate = new Date(year, month - 1, day);
-                    console.log(`Parsed date: ${datePart} -> ${parsedDate.toISOString()}`);
                     return parsedDate;
                 }
             }
@@ -424,10 +426,10 @@ function updateDashboard(data) {
     console.log('People list:', people);
     console.log('Avg closed per person calculation:', totalClosed, '/', people.length, '=', avgClosedPerPerson);
     
-    // Calculate open tickets and aging metrics early
+    // Calculate open tickets and aging metrics early (exclude State = "Blocked" since we use DEBLOCKED column)
     const openUniqueTickets = pbisUnique.filter(row => {
         const state = row['State'] || '';
-        return state !== 'Done' && state !== 'Removed' && state !== 'Closed';
+        return state !== 'Done' && state !== 'Removed' && state !== 'Closed' && state.toLowerCase() !== 'blocked';
     });
     
     // Calculate age for each open unique ticket
@@ -638,6 +640,71 @@ function updateDashboard(data) {
         <div class="col-md-3 kpi">Avg Age (Open): ${avgAgeAllOpen} days</div>
         <div class="col-md-3 kpi">Avg Closed/Person: ${avgClosedPerPerson}</div>
     `;
+    
+    // Calculate and display blocked items summary (exclude State = "Blocked" since we use DEBLOCKED column)
+    const filteredDataForSummary = uniqueData.filter(row => {
+        const state = row['State'] || '';
+        return state.toLowerCase() !== 'blocked'; // Exclude items with State = "Blocked"
+    });
+    
+    const totalBlockedItems = filteredDataForSummary.filter(row => {
+        const deblocked = row['DEBLOCKED'];
+        return (deblocked === 'TRUE' || deblocked === true || deblocked === 'True');
+    });
+    
+    if (totalBlockedItems.length > 0) {
+        const blockedPercentage = ((totalBlockedItems.length / filteredDataForSummary.length) * 100).toFixed(1);
+        
+        // Calculate average age of blocked items
+        let totalBlockedAge = 0;
+        let blockedItemsWithAge = 0;
+        
+        totalBlockedItems.forEach(item => {
+            const createdDate = parseDate(item['Created Date']);
+            if (createdDate) {
+                const ageInDays = Math.floor((today - createdDate) / (1000 * 60 * 60 * 24));
+                totalBlockedAge += ageInDays;
+                blockedItemsWithAge++;
+            }
+        });
+        
+        const avgBlockedAge = blockedItemsWithAge > 0 ? (totalBlockedAge / blockedItemsWithAge).toFixed(1) : 0;
+        
+        // Group blocked items by state
+        const blockedByStateForSummary = {};
+        totalBlockedItems.forEach(item => {
+            const state = item['State'] || 'Unknown';
+            if (!blockedByStateForSummary[state]) {
+                blockedByStateForSummary[state] = 0;
+            }
+            blockedByStateForSummary[state]++;
+        });
+        
+        // Show the blocked summary section
+        document.getElementById('blockedSummarySection').style.display = 'block';
+        document.getElementById('blockedSummaryContent').innerHTML = `
+            <div class="col-md-3">
+                <strong>Total Blocked:</strong><br>
+                <span class="text-danger" style="font-size: 1.5rem;">${totalBlockedItems.length}</span>
+                <small class="d-block text-muted">(${blockedPercentage}% of all PBI's)</small>
+            </div>
+            <div class="col-md-3">
+                <strong>Avg Blocked Age:</strong><br>
+                <span class="text-warning" style="font-size: 1.5rem;">${avgBlockedAge}</span>
+                <small class="d-block text-muted">days</small>
+            </div>
+            <div class="col-md-6">
+                <strong>Blocked by State:</strong><br>
+                ${Object.entries(blockedByStateForSummary)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([state, count]) => `<span class="badge bg-warning text-dark me-1">${state}: ${count}</span>`)
+                    .join(' ')}
+            </div>
+        `;
+    } else {
+        // Hide the blocked summary section if no blocked items
+        document.getElementById('blockedSummarySection').style.display = 'none';
+    }
     // Tickets per person chart
     const tppCtx = document.getElementById('ticketsPerPersonChart').getContext('2d');
     new Chart(tppCtx, {
@@ -878,9 +945,17 @@ function updateDashboard(data) {
     
     // Create heatmap data structure for Chart.js
     const heatmapData = [];
-    const maxValue = Math.max(...Object.values(monthlyDeveloperData).flatMap(month => 
+    
+    // Calculate min and max values for dynamic color scaling
+    const allValues = Object.values(monthlyDeveloperData).flatMap(month => 
         Object.values(month)
-    ));
+    ).filter(val => val > 0); // Exclude zeros from min/max calculation
+    
+    const maxValue = allValues.length > 0 ? Math.max(...allValues) : 0;
+    const minValue = allValues.length > 0 ? Math.min(...allValues) : 0;
+    
+    console.log(`Heatmap value range: min=${minValue}, max=${maxValue}`);
+    console.log('Sample values for color scaling:', allValues.slice(0, 10));
     
     sortedMonths.forEach((month, monthIndex) => {
         sortedDevelopers.forEach((developer, devIndex) => {
@@ -913,14 +988,54 @@ function updateDashboard(data) {
     const monthsTitleOffset = rightLabelOffset + maxMonthLabelWidth + titleGap; // used by plugin
     const dynamicRightPadding = Math.ceil(monthsTitleOffset + 40); // ensure title has breathing room
 
-    // Function to get color based on value
-    function getHeatmapColor(value, maxValue) {
-        if (value === 0) return 'rgba(255, 152, 0, 0.9)'; // Orange for 0
+    // Function to get color based on value using dynamic heat mapping
+    function getHeatmapColor(value, maxValue, minValue) {
+        if (value === 0) return 'rgba(255, 152, 0, 0.8)'; // Orange for zero (no white)
         
-        // Color based on actual ticket count ranges
-        if (value >= 7) return 'rgba(27, 94, 32, 1.0)'; // Dark green for 7+
-        if (value >= 2) return 'rgba(76, 175, 80, 0.9)'; // Light green for 2-6
-        return 'rgba(255, 235, 59, 0.8)'; // Yellow for 1
+        // Calculate the range and position within that range
+        const range = maxValue - minValue;
+        if (range === 0) {
+            // All values are the same, use medium green
+            return 'rgba(76, 175, 80, 0.8)';
+        }
+        
+        // For value = 1, always use yellow
+        if (value === 1) {
+            return 'rgba(255, 235, 59, 0.9)'; // Yellow for 1
+        }
+        
+        // For value = 2, always use light green
+        if (value === 2) {
+            return 'rgba(139, 195, 74, 0.8)'; // Light green for 2
+        }
+        
+        // For values > 2, use dynamic scaling
+        if (value > 2) {
+            // Normalize value to 0-1 scale within the range above 2
+            const adjustedMin = Math.max(3, minValue);
+            const adjustedRange = maxValue - adjustedMin;
+            
+            if (adjustedRange <= 0) {
+                return 'rgba(76, 175, 80, 0.9)'; // Medium green if all values are 2 or below
+            }
+            
+            const normalizedValue = (value - adjustedMin) / adjustedRange;
+            
+            // Create heat map colors from medium to dark green for values > 2
+            if (normalizedValue >= 0.7) {
+                // Top 30% - Dark green
+                return 'rgba(27, 94, 32, 1.0)';
+            } else if (normalizedValue >= 0.4) {
+                // 40-70% - Medium-dark green
+                return 'rgba(46, 125, 50, 0.9)';
+            } else {
+                // Bottom 40% of values > 2 - Medium green
+                return 'rgba(76, 175, 80, 0.8)';
+            }
+        }
+        
+        // Fallback (shouldn't reach here)
+        return 'rgba(76, 175, 80, 0.8)';
     }
     
     new Chart(developerHeatmapCtx, {
@@ -933,7 +1048,7 @@ function updateDashboard(data) {
                     y: point.y,
                     value: point.v
                 })),
-                backgroundColor: heatmapData.map(point => getHeatmapColor(point.v, maxValue)),
+                backgroundColor: heatmapData.map(point => getHeatmapColor(point.v, maxValue, minValue)),
                 borderColor: '#FFFFFF',
                 borderWidth: 1,
                 pointStyle: 'rect',
@@ -1065,7 +1180,7 @@ function updateDashboard(data) {
                         const height = bottom - top;
                         if (width <= 0 || height <= 0) return;
                         // Fill the entire cell (touching edges) for a fully colored heatmap
-                        ctx.fillStyle = getHeatmapColor(point.v, maxValue);
+                        ctx.fillStyle = getHeatmapColor(point.v, maxValue, minValue);
                         ctx.fillRect(left, top, width, height);
                     });
                     ctx.restore();
@@ -1144,15 +1259,17 @@ function updateDashboard(data) {
         ]
     });
     
-    // Add a legend/scale for the heatmap
+    // Add a dynamic legend/scale for the heatmap
     const heatmapLegendHtml = `
         <div style="margin-top: 10px; text-align: center;">
-            <strong>PBI Count Scale:</strong>
+            <strong>Heat Map Scale (PBI Count):</strong>
             <span style="display: inline-block; margin: 0 10px;">
-                <span style="background: rgba(255, 152, 0, 0.9); padding: 8px 12px; margin: 2px; border: 1px solid #cc8400; color: #000; font-weight: bold;">0</span>
-                <span style="background: rgba(255, 235, 59, 0.8); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #000; font-weight: bold;">1</span>
-                <span style="background: rgba(76, 175, 80, 0.9); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #000; font-weight: bold;">2–6</span>
-                <span style="background: rgba(27, 94, 32, 1.0); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #fff; font-weight: bold;">7+</span>
+                <span style="background: rgba(255, 152, 0, 0.8); padding: 8px 12px; margin: 2px; border: 1px solid #cc8400; color: #000; font-weight: bold;">0</span>
+                <span style="background: rgba(255, 235, 59, 0.9); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #000; font-weight: bold;">1</span>
+                <span style="background: rgba(139, 195, 74, 0.8); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #000; font-weight: bold;">2</span>
+                <span style="background: rgba(76, 175, 80, 0.8); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #000; font-weight: bold;">3-${Math.round(maxValue * 0.7)}</span>
+                <span style="background: rgba(46, 125, 50, 0.9); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #fff; font-weight: bold;">${Math.round(maxValue * 0.7) + 1}-${Math.round(maxValue * 0.9)}</span>
+                <span style="background: rgba(27, 94, 32, 1.0); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #fff; font-weight: bold;">${Math.round(maxValue * 0.9) + 1}+</span>
             </span>
         </div>
     `;
@@ -1163,12 +1280,23 @@ function updateDashboard(data) {
     // Quarterly Closed PBI's & Average State Duration Analysis
     const quarterlyClosedData = {};
     
-    // Process closed tickets to calculate quarterly data
+    // First, let's group data by Work Item Id to calculate actual blocked days
+    const workItemHistory = {};
+    data.forEach(row => {
+        const workItemId = row['Work Item Id'];
+        if (!workItemHistory[workItemId]) {
+            workItemHistory[workItemId] = [];
+        }
+        workItemHistory[workItemId].push(row);
+    });
+    
+    // Process closed tickets to calculate quarterly data with actual blocked time
     closedTickets.forEach(row => {
         const closedDate = parseDate(row['Closed Date']);
         const createdDate = parseDate(row['Created Date']);
+        const workItemId = row['Work Item Id'];
         
-        if (closedDate && createdDate) {
+        if (closedDate && createdDate && workItemHistory[workItemId]) {
             // Calculate quarter key
             const year = closedDate.getFullYear();
             const quarter = Math.ceil((closedDate.getMonth() + 1) / 3);
@@ -1188,28 +1316,47 @@ function updateDashboard(data) {
             // Calculate total time from creation to closure
             const totalDays = Math.max(0, Math.floor((closedDate - createdDate) / (1000 * 60 * 60 * 24)));
             
-            // Get current state and check if it was blocked
-            const currentState = row['State'] || 'Unknown';
-            const isBlocked = row['DEBLOCKED'] && row['DEBLOCKED'].toString().toLowerCase() === 'true';
+            // Calculate ACTUAL blocked days from the history
+            const workItemHistoryData = workItemHistory[workItemId];
+            let actualBlockedDays = 0;
+            let wasEverBlocked = false;
             
-            // For this analysis, we'll calculate average duration per state based on total lifecycle
-            // Since we don't have state transition history, we'll estimate based on common state patterns
-            const estimatedStateDurations = calculateEstimatedStateDurations(totalDays, currentState, isBlocked);
+            // Count consecutive days where DEBLOCKED = TRUE
+            const sortedHistory = workItemHistoryData.sort((a, b) => {
+                const dateA = parseDate(a['Date']);
+                const dateB = parseDate(b['Date']);
+                return dateA - dateB;
+            });
+            
+            sortedHistory.forEach(historyRow => {
+                const isBlocked = historyRow['DEBLOCKED'] && 
+                                 historyRow['DEBLOCKED'].toString().toUpperCase() === 'TRUE';
+                if (isBlocked) {
+                    actualBlockedDays++;
+                    wasEverBlocked = true;
+                }
+            });
+            
+            // Get current state for estimation purposes
+            const currentState = row['State'] || 'Unknown';
+            
+            // Calculate estimated state durations using actual blocked time
+            const estimatedStateDurations = calculateEstimatedStateDurationsWithActualBlocking(
+                totalDays, currentState, actualBlockedDays, wasEverBlocked
+            );
             
             // Add to quarterly data
             quarterlyClosedData[quarterKey].totalClosed += 1;
             quarterlyClosedData[quarterKey].totalDurationAcrossStates += totalDays;
             quarterlyClosedData[quarterKey].pbiCount += 1;
             
-            // Handle blocked state tracking
-            if (isBlocked) {
-                // Estimate blocked duration (assume 20-40% of total time if blocked)
-                const estimatedBlockedDays = Math.round(totalDays * 0.3); // 30% average
-                quarterlyClosedData[quarterKey].blockedInfo.totalBlockedDays += estimatedBlockedDays;
+            // Track actual blocked information
+            if (wasEverBlocked && actualBlockedDays > 0) {
+                quarterlyClosedData[quarterKey].blockedInfo.totalBlockedDays += actualBlockedDays;
                 quarterlyClosedData[quarterKey].blockedInfo.blockedCount += 1;
                 
-                // Add blocked state to estimations
-                estimatedStateDurations['Blocked'] = estimatedBlockedDays;
+                // Add actual blocked state to estimations
+                estimatedStateDurations['Blocked'] = actualBlockedDays;
             }
             
             // Aggregate state durations
@@ -1223,20 +1370,80 @@ function updateDashboard(data) {
         }
     });
     
-    // Helper function to estimate state durations (since we don't have transition history)
-    function calculateEstimatedStateDurations(totalDays, finalState, isBlocked = false) {
-        // Basic estimation based on common patterns - this is a simplified model
+    // Helper function to estimate state durations using actual blocked time from DEBLOCKED column
+    function calculateEstimatedStateDurationsWithActualBlocking(totalDays, finalState, actualBlockedDays, wasEverBlocked = false) {
         const durations = {};
         
         if (totalDays <= 0) return durations;
         
-        // Adjust total available days if item was blocked
+        // Use actual blocked days from the data
+        let availableDays = totalDays;
+        if (wasEverBlocked && actualBlockedDays > 0) {
+            // Ensure blocked days don't exceed total days
+            const blockedDays = Math.min(actualBlockedDays, totalDays);
+            availableDays = totalDays - blockedDays;
+            durations['Blocked'] = blockedDays;
+        }
+        
+        // Apply pattern based on final state for remaining time
+        if (finalState.toLowerCase().includes('done') || finalState.toLowerCase().includes('completed')) {
+            durations['New'] = Math.round(availableDays * 0.10);
+            durations['Analysis'] = Math.round(availableDays * 0.15);
+            durations['Development'] = Math.round(availableDays * 0.50);
+            durations['Review'] = Math.round(availableDays * 0.15);
+            durations['Done'] = Math.round(availableDays * 0.10);
+        } else {
+            // For other states, distribute more evenly
+            durations[finalState] = Math.round(availableDays * 0.70);
+            durations['New'] = Math.round(availableDays * 0.15);
+            durations['Analysis'] = Math.round(availableDays * 0.15);
+        }
+        
+        return durations;
+    }
+    
+    // Original helper function to estimate state durations (since we don't have transition history)
+    function calculateEstimatedStateDurations(totalDays, finalState, isBlocked = false) {
+        // Enhanced estimation model that considers blocking impact
+        const durations = {};
+        
+        if (totalDays <= 0) return durations;
+        
+        // Calculate blocked time more intelligently based on final state
         let availableDays = totalDays;
         let blockedDays = 0;
         
         if (isBlocked) {
-            // Estimate 20-40% of time was spent blocked (average 30%)
-            blockedDays = Math.round(totalDays * 0.3);
+            // State-specific blocked time estimation
+            switch(finalState.toLowerCase()) {
+                case 'development':
+                case 'in progress':
+                    // Development blocks tend to be longer (25-50% of total time)
+                    blockedDays = Math.round(totalDays * (0.25 + Math.random() * 0.25));
+                    break;
+                case 'analysis':
+                case 'review':
+                    // Analysis/review blocks are typically shorter (15-35% of total time)
+                    blockedDays = Math.round(totalDays * (0.15 + Math.random() * 0.20));
+                    break;
+                case 'test':
+                case 'testing':
+                    // Testing blocks are moderate (20-40% of total time)
+                    blockedDays = Math.round(totalDays * (0.20 + Math.random() * 0.20));
+                    break;
+                case 'done':
+                case 'completed':
+                    // If it's done but was blocked, assume blocking happened earlier
+                    // Distribute blocked time across the development phase
+                    blockedDays = Math.round(totalDays * 0.30);
+                    break;
+                default:
+                    // Default estimation (20-40% of time was spent blocked)
+                    blockedDays = Math.round(totalDays * (0.20 + Math.random() * 0.20));
+            }
+            
+            // Ensure blocked days don't exceed 80% of total time
+            blockedDays = Math.min(blockedDays, Math.round(totalDays * 0.8));
             availableDays = totalDays - blockedDays;
             durations['Blocked'] = blockedDays;
         }
@@ -1340,7 +1547,7 @@ function updateDashboard(data) {
             plugins: {
                 title: {
                     display: true,
-                    text: 'Quarterly Analysis: Closed PBI\'s Count & Average State Duration',
+                    text: 'Quarterly Analysis: Closed PBI\'s Count & Average State Duration (Red Line = Actual Blocked Days)',
                     font: { size: 16, weight: 'bold' },
                     color: '#2C3E50'
                 },
@@ -1378,12 +1585,13 @@ function updateDashboard(data) {
                                 
                                 let result = [`Overall Avg Duration: ${avgTotalDuration} days`];
                                 
-                                // Add blocked state information if available
+                                // Add actual blocked state information if available
                                 if (qData.blockedInfo.blockedCount > 0) {
-                                    const avgBlockedDays = (qData.blockedInfo.totalBlockedDays / qData.blockedInfo.blockedCount).toFixed(1);
+                                    const avgActualBlockedDays = (qData.blockedInfo.totalBlockedDays / qData.blockedInfo.blockedCount).toFixed(1);
                                     const blockedPercentage = ((qData.blockedInfo.blockedCount / qData.totalClosed) * 100).toFixed(1);
                                     result.push(`Blocked PBI's: ${qData.blockedInfo.blockedCount} (${blockedPercentage}%)`);
-                                    result.push(`Avg Blocked Duration: ${avgBlockedDays} days`);
+                                    result.push(`Actual Avg Blocked Days: ${avgActualBlockedDays} days`);
+                                    result.push(`(Based on DEBLOCKED=TRUE entries)`);
                                 }
                                 
                                 return result;
@@ -1613,24 +1821,76 @@ function updateDashboard(data) {
     
     // Continue with other existing functionality...
     
-    // Blocked state analysis using unique work items
+    // Blocked state analysis using unique work items (exclude State = "Blocked" since we use DEBLOCKED column)
     const blockedCounts = {};
-    uniqueData.forEach(row => {
+    const blockedByState = {}; // Track which states have blocked items
+    
+    const filteredUniqueData = uniqueData.filter(row => {
+        const state = row['State'] || '';
+        return state.toLowerCase() !== 'blocked'; // Exclude items with State = "Blocked"
+    });
+    
+    filteredUniqueData.forEach(row => {
         const deblocked = row['DEBLOCKED'];
-        const blockedStatus = (deblocked === 'TRUE' || deblocked === true || deblocked === 'True') ? 'Blocked' : 'Not Blocked';
+        const currentState = row['State'] || 'Unknown';
+        
+        // DEBLOCKED = TRUE means the item IS currently blocked
+        // DEBLOCKED = FALSE means the item is NOT blocked
+        const isBlocked = (deblocked === 'TRUE' || deblocked === true || deblocked === 'True');
+        const blockedStatus = isBlocked ? 'Blocked' : 'Not Blocked';
+        
         blockedCounts[blockedStatus] = (blockedCounts[blockedStatus] || 0) + 1;
+        
+        // Track blocked items by state
+        if (isBlocked) {
+            if (!blockedByState[currentState]) {
+                blockedByState[currentState] = { count: 0, totalAge: 0 };
+            }
+            blockedByState[currentState].count += 1;
+            
+            // Calculate age for blocked items
+            const createdDate = parseDate(row['Created Date']);
+            if (createdDate) {
+                const ageInDays = Math.floor((today - createdDate) / (1000 * 60 * 60 * 24));
+                blockedByState[currentState].totalAge += ageInDays;
+            }
+        }
     });
     
     const blockedRows = Object.entries(blockedCounts).map(([status, count]) => ({
         status: status,
         count: count,
-        percentage: ((count / uniqueData.length) * 100).toFixed(1)
+        percentage: ((count / filteredUniqueData.length) * 100).toFixed(1)
+    }));
+    
+    // Add blocked by state information to the blocked table
+    const blockedByStateRows = Object.entries(blockedByState).map(([state, data]) => ({
+        status: `${state} (Blocked)`,
+        count: data.count,
+        percentage: ((data.count / uniqueData.length) * 100).toFixed(1),
+        avgAge: data.count > 0 ? (data.totalAge / data.count).toFixed(1) : '0'
     }));
     
     const blockedBody = document.querySelector('#blockedStateTable tbody');
-    blockedBody.innerHTML = blockedRows.map(row => 
-        `<tr><td>${row.status}</td><td>${row.count}</td><td>${row.percentage}%</td></tr>`
-    ).join('');
+    
+    // Combine overall blocked counts with state-specific blocked information
+    const allBlockedRows = [
+        ...blockedRows,
+        ...blockedByStateRows
+    ];
+    
+    blockedBody.innerHTML = allBlockedRows.map(row => {
+        const isStateSpecific = row.status.includes('(Blocked)');
+        const rowClass = isStateSpecific ? 'table-warning' : '';
+        const avgAgeColumn = row.avgAge ? `<td>${row.avgAge} days</td>` : '<td>-</td>';
+        
+        return `<tr class="${rowClass}">
+            <td>${row.status}</td>
+            <td>${row.count}</td>
+            <td>${row.percentage}%</td>
+            ${avgAgeColumn}
+        </tr>`;
+    }).join('');
     
     // Feature details table - showing implemented and in progress features ONLY (no Product Backlog Items) using unique work items
     const featureDetails = uniqueData.filter(row => {
@@ -1757,10 +2017,12 @@ function updateDashboard(data) {
     const scatterData = [];
     const statePositions = {}; // Map states to x-axis positions
     
-    // Filter for Product Backlog Items only
+    // Filter for Product Backlog Items only, excluding items with State = "Blocked"
+    // (We use DEBLOCKED column for blocking representation instead)
     const productBacklogItems = openUniqueTicketsWithAge.filter(ticket => {
         const workItemType = ticket['Work Item Type'] || '';
-        return workItemType === 'Product Backlog Item';
+        const state = ticket['State'] || '';
+        return workItemType === 'Product Backlog Item' && state.toLowerCase() !== 'blocked';
     });
     
     const uniqueStates = [...new Set(productBacklogItems.map(ticket => ticket['State'] || 'Unknown'))].sort();
@@ -1770,35 +2032,26 @@ function updateDashboard(data) {
         statePositions[state] = index;
     });
     
-    // Enhanced state colors for scatter plot
+    // Enhanced state colors for scatter plot (Blocked is NOT a state - it's a condition)
     const scatterStateColors = {
         'In Progress': '#3498db',
         'Development': '#e74c3c', 
         'Analysis': '#f39c12',
         'Review': '#2ecc71',
         'Test': '#9b59b6',
-        'Blocked': '#e67e22',
         'New': '#95a5a6',
         'Unknown': '#34495e'
     };
     
-    // Function to get color based on age and blocked status
+    // Simplified function to get color - only two colors: default blue and red for blocked
     function getScatterColor(ticket) {
-        const age = ticket.ageInDays;
         const isBlocked = (ticket['DEBLOCKED'] === true) || (String(ticket['DEBLOCKED']).toLowerCase() === 'true');
 
         if (isBlocked) {
-            // Red for blocked items (shade slightly by age)
-            if (age > 90) return '#8B0000'; // Dark red
-            if (age > 60) return '#C0392B'; // Strong red
-            if (age > 25) return '#E74C3C'; // Red
-            return '#FF6B6B'; // Light red
+            return '#E74C3C'; // Red for blocked items
         }
 
-        // Non-blocked items: blue/teal/gray by age (no red)
-    if (age <= 25) return '#27AE60'; // Green
-        if (age <= 60) return '#17A2B8'; // Teal
-        return '#6C757D'; // Gray for old but not blocked
+        return '#3498DB'; // Default blue for all non-blocked items
     }
     
     // Prepare scatter plot data (Product Backlog Items only)
@@ -1816,13 +2069,13 @@ function updateDashboard(data) {
         });
     });
     
-    // Group data by color for proper rendering
+    // Group data by color for proper rendering - simplified to just two categories
     const scatterDatasets = {};
     scatterData.forEach(point => {
         const color = point.color;
         if (!scatterDatasets[color]) {
             scatterDatasets[color] = {
-                label: point.isBlocked ? 'Blocked Items' : `Age: ${point.y <= 25 ? '≤25 days' : point.y <= 60 ? '26-60 days' : '>60 days'}`,
+                label: point.isBlocked ? 'Blocked Items' : 'Regular Items',
                 data: [],
                 backgroundColor: color,
                 borderColor: color,
@@ -1836,19 +2089,20 @@ function updateDashboard(data) {
     
     const agingScatterCtx = document.getElementById('agingScatterChart').getContext('2d');
     
-    // Calculate overall health score based on ticket age distribution
+    // Calculate overall health score based on blocked vs non-blocked items
     const totalItems = productBacklogItems.length;
     let healthScore = 0;
     
     if (totalItems > 0) {
-        const greenTickets = productBacklogItems.filter(ticket => ticket.ageInDays <= 25).length;
-        const orangeTickets = productBacklogItems.filter(ticket => ticket.ageInDays > 25 && ticket.ageInDays <= 60).length;
-        const redTickets = productBacklogItems.filter(ticket => ticket.ageInDays > 60).length;
+        const blockedTickets = productBacklogItems.filter(ticket => {
+            return (ticket['DEBLOCKED'] === true) || (String(ticket['DEBLOCKED']).toLowerCase() === 'true');
+        }).length;
+        const nonBlockedTickets = totalItems - blockedTickets;
         
-        // Calculate health score (0-100): Green=good, Orange=neutral, Red=bad
-        healthScore = ((greenTickets * 100) + (orangeTickets * 50) + (redTickets * 0)) / totalItems;
+        // Calculate health score (0-100): Non-blocked = good, Blocked = bad
+        healthScore = (nonBlockedTickets * 100) / totalItems;
         
-        console.log(`Health Analysis: ${greenTickets} green, ${orangeTickets} orange, ${redTickets} red tickets. Health Score: ${healthScore.toFixed(1)}`);
+        console.log(`Health Analysis: ${nonBlockedTickets} non-blocked, ${blockedTickets} blocked tickets. Health Score: ${healthScore.toFixed(1)}`);
     }
     
     // Determine background color based on health score
@@ -2021,28 +2275,26 @@ function updateDashboard(data) {
     // Update health indicator display
     const healthIndicator = document.getElementById('healthIndicator');
     if (totalItems > 0) {
-        const greenTickets = productBacklogItems.filter(ticket => ticket.ageInDays <= 25).length;
-        const orangeTickets = productBacklogItems.filter(ticket => ticket.ageInDays > 25 && ticket.ageInDays <= 60).length;
-        const redTickets = productBacklogItems.filter(ticket => ticket.ageInDays > 60).length;
         const blockedTickets = productBacklogItems.filter(ticket => 
             ticket['DEBLOCKED'] === 'TRUE' || ticket['DEBLOCKED'] === true || ticket['DEBLOCKED'] === 'True'
         ).length;
+        const nonBlockedTickets = totalItems - blockedTickets;
         
         let healthMessage, healthClass, borderColor;
         
-        if (healthScore >= 75) {
+        if (healthScore >= 90) {
             healthMessage = `🟢 EXCELLENT Health (${healthScore.toFixed(1)}%)`;
             healthClass = 'alert-success';
             borderColor = '#27AE60';
-        } else if (healthScore >= 50) {
+        } else if (healthScore >= 75) {
             healthMessage = `🟡 GOOD Health (${healthScore.toFixed(1)}%)`;
             healthClass = 'alert-info';
             borderColor = '#2ECC71';
-        } else if (healthScore >= 35) {
+        } else if (healthScore >= 50) {
             healthMessage = `🟠 MODERATE Health (${healthScore.toFixed(1)}%)`;
             healthClass = 'alert-warning';
             borderColor = '#F1C40F';
-        } else if (healthScore >= 20) {
+        } else if (healthScore >= 25) {
             healthMessage = `🟠 CONCERNING Health (${healthScore.toFixed(1)}%)`;
             healthClass = 'alert-warning';
             borderColor = '#F39C12';
@@ -2057,11 +2309,9 @@ function updateDashboard(data) {
         healthIndicator.innerHTML = `
             <strong>${healthMessage}</strong><br>
             <small>
-                📊 Distribution: 
-                <span class="badge bg-success">${greenTickets} Recent (≤25 days)</span>
-                <span class="badge bg-warning">${orangeTickets} Moderate (26-60 days)</span>
-                <span class="badge bg-danger">${redTickets} Old (>60 days)</span>
-                ${blockedTickets > 0 ? `<span class="badge bg-dark">${blockedTickets} Blocked</span>` : ''}
+                📊 Status Distribution: 
+                <span class="badge bg-primary">${nonBlockedTickets} Regular Items</span>
+                <span class="badge bg-danger">${blockedTickets} Blocked Items</span>
                 | <strong>Total: ${totalItems} Product Backlog Items</strong>
             </small>
         `;
@@ -2236,12 +2486,11 @@ function updateDashboard(data) {
             <td>${ticket.startDate}</td>
         </tr>`;
     }).join('');
+    
 }
 document.getElementById('csvFileInput').addEventListener('change', function(e) {
     const file = e.target.files[0];
     if (!file) return;
-    
-    console.log('File selected:', file.name, 'Size:', file.size);
     
     // Show loading indicator
     document.getElementById('kpiSection').innerHTML = '<div class="col-12 text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div><p>Processing CSV file...</p></div>';
@@ -2250,11 +2499,6 @@ document.getElementById('csvFileInput').addEventListener('change', function(e) {
         header: true,
         skipEmptyLines: true,
         complete: function(results) {
-            console.log('Papa.parse completed');
-            console.log('Data rows:', results.data.length);
-            console.log('Columns:', Object.keys(results.data[0] || {}));
-            console.log('Sample row:', results.data[0]);
-            
             if (results.errors.length > 0) {
                 console.error('CSV parsing errors:', results.errors);
                 document.getElementById('kpiSection').innerHTML = '<div class="col-12 alert alert-danger">CSV parsing errors: ' + results.errors.map(e => e.message).join(', ') + '</div>';
@@ -2268,7 +2512,6 @@ document.getElementById('csvFileInput').addEventListener('change', function(e) {
             
             try {
                 updateDashboard(results.data);
-                console.log('Dashboard updated successfully');
             } catch (error) {
                 console.error('Error updating dashboard:', error);
                 document.getElementById('kpiSection').innerHTML = '<div class="col-12 alert alert-danger">Error processing data: ' + error.message + '</div>';
@@ -2280,72 +2523,7 @@ document.getElementById('csvFileInput').addEventListener('change', function(e) {
         }
     });
 });
-document.getElementById('downloadPdfBtn').addEventListener('click', function() {
-    const button = this;
-    button.disabled = true;
-    button.textContent = 'Generating PDF...';
-    
-    // Get the dashboard element
-    const dashboardElement = document.getElementById('dashboard');
-    
-    // Store original styles
-    const originalStyles = {};
-    const elementsToModify = dashboardElement.querySelectorAll('.table-responsive');
-    
-    // Temporarily remove scrollable constraints for complete capture
-    elementsToModify.forEach((el, index) => {
-        originalStyles[index] = {
-            maxHeight: el.style.maxHeight,
-            overflow: el.style.overflow
-        };
-        el.style.maxHeight = 'none';
-        el.style.overflow = 'visible';
-    });
-    
-    // Wait a moment for layout to settle
-    setTimeout(() => {
-        html2pdf().set({
-            margin: 0.5,
-            filename: 'work_item_dashboard_report.pdf',
-            image: { 
-                type: 'jpeg', 
-                quality: 0.92 
-            },
-            html2canvas: { 
-                scale: 0.8, // Lower scale for better fit
-                useCORS: true,
-                allowTaint: true,
-                letterRendering: true,
-                logging: false,
-                width: dashboardElement.scrollWidth,
-                height: dashboardElement.scrollHeight,
-                x: 0,
-                y: 0,
-                scrollX: 0,
-                scrollY: 0
-            },
-            jsPDF: { 
-                unit: 'in', 
-                format: 'a4', 
-                orientation: 'portrait' 
-            }
-        }).from(dashboardElement).save().then(() => {
-            // Restore original styles
-            elementsToModify.forEach((el, index) => {
-                el.style.maxHeight = originalStyles[index].maxHeight;
-                el.style.overflow = originalStyles[index].overflow;
-            });
-            
-            // Reset button
-            button.disabled = false;
-            button.textContent = 'Download Report as PDF';
-        }).catch(() => {
-            // Reset button on error
-            button.disabled = false;
-            button.textContent = 'Download Report as PDF';
-        });
-    }, 500);
-});
 </script>
 </body>
 </html>
+
