@@ -16,6 +16,7 @@
             Chart.defaults.interaction.intersect = false;
             Chart.defaults.interaction.mode = 'nearest';
             Chart.defaults.events = ['mousemove','mouseout','click','touchstart','touchmove','touchend'];
+            Chart.defaults.animation = false; // Disable global animations to prevent expansion effects
         }
 
         // Helper to guard tooltip callbacks from errors
@@ -25,13 +26,110 @@
                 catch (err) { console.error('Tooltip callback error:', err); return fallback; }
             };
         }
+        // Global chart registry
+        const DASHBOARD_CHARTS = {};
+        function registerChart(id, chart) { DASHBOARD_CHARTS[id] = chart; attachToolbar(id); }
+        function attachToolbar(id){
+            const holder = document.querySelector(`.chart-tools[data-chart="${id}"]`);
+            if(!holder) return;
+            holder.innerHTML = '';
+            const btnPng = document.createElement('button');
+            btnPng.type='button'; btnPng.title='Export PNG'; btnPng.innerHTML='🖼️';
+            btnPng.addEventListener('click', ()=> exportChartPNG(id));
+            const btnCopy = document.createElement('button');
+            btnCopy.type='button'; btnCopy.title='Copy Image to Clipboard'; btnCopy.innerHTML='📋';
+            btnCopy.addEventListener('click', ()=> copyChartToClipboard(id));
+            holder.appendChild(btnPng); holder.appendChild(btnCopy);
+        }
+        function withForcedLightMode(cb){
+            const wasDark = document.body.classList.contains('dark-mode');
+            if(wasDark) document.body.classList.remove('dark-mode');
+            try { cb(); } finally { if(wasDark) document.body.classList.add('dark-mode'); }
+        }
+        function exportChartPNG(id){
+            const chart = DASHBOARD_CHARTS[id];
+            if(!chart) return;
+            withForcedLightMode(()=>{
+                chart.update();
+                const a = document.createElement('a');
+                a.download = `${id}-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'_')}.png`;
+                a.href = chart.toBase64Image('image/png',1);
+                a.click();
+            });
+        }
+        async function copyChartToClipboard(id){
+            try {
+                const chart = DASHBOARD_CHARTS[id];
+                if(!chart) return;
+                let dataUrl;
+                withForcedLightMode(()=>{ chart.update(); dataUrl = chart.toBase64Image('image/png',1); });
+                const res = await fetch(dataUrl);
+                const blob = await res.blob();
+                await navigator.clipboard.write([
+                    new ClipboardItem({ [blob.type]: blob })
+                ]);
+                flashStatus(id, 'Copied');
+            } catch(err){ console.error('Copy failed', err); flashStatus(id,'Copy failed'); }
+        }
+        function flashStatus(id, msg){
+            const holder = document.querySelector(`.chart-tools[data-chart="${id}"]`);
+            if(!holder) return;
+            const span = document.createElement('span');
+            span.style.fontSize = '.65rem'; span.style.marginLeft='4px'; span.style.opacity='0.85'; span.textContent=msg;
+            holder.appendChild(span);
+            setTimeout(()=> span.remove(), 1800);
+        }
+        // Dark mode toggle
+        document.addEventListener('DOMContentLoaded', () => {
+            const toggle = document.getElementById('darkModeToggle');
+            if(toggle){
+                toggle.addEventListener('click', () => {
+                    const dark = document.body.classList.toggle('dark-mode');
+                    toggle.setAttribute('aria-pressed', dark ? 'true' : 'false');
+                    toggle.textContent = dark ? '☀️ Light' : '🌙 Dark';
+                    // Refresh chart colors (basic adaptation by updating ticks & legend color)
+                    Object.values(DASHBOARD_CHARTS).forEach(ch => {
+                        if(!ch) return;
+                        const color = dark ? '#e6e6e6' : '#212529';
+                        if(ch.options.scales){
+                            Object.values(ch.options.scales).forEach(scale => {
+                                scale.ticks = scale.ticks || {}; scale.ticks.color = color;
+                                scale.title = scale.title || {}; scale.title.color = color;
+                                scale.grid = scale.grid || {}; scale.grid.color = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+                            });
+                        }
+                        if(ch.options.plugins && ch.options.plugins.legend){
+                            ch.options.plugins.legend.labels = ch.options.plugins.legend.labels || {}; ch.options.plugins.legend.labels.color = color;
+                        }
+                        if(ch.options.plugins && ch.options.plugins.title){
+                            ch.options.plugins.title.color = color;
+                        }
+                        ch.update('none');
+                    });
+                });
+            }
+        });
     </script>
     <style>
         body { background: #f8f9fa; }
         .dashboard-section { margin-bottom: 2rem; }
-        .chart-container { 
-            min-height: 350px; 
+        /* Increased chart heights for better readability */
+        .chart-container {
+            height: 420px;
             position: relative;
+            padding: .25rem .25rem .5rem;
+        }
+    .chart-container.heatmap-container { height: 620px; }
+    .chart-container.small-chart { height: 360px; }
+    .chart-container.tall-chart { height: 500px; }
+    .chart-container.pie-chart { height: 440px; }
+        .chart-container canvas { width:100% !important; height:100% !important; }
+        @media (max-width: 992px) {
+            .chart-container { height: 340px; }
+            .chart-container.heatmap-container { height: 520px; }
+            .chart-container.small-chart { height: 300px; }
+            .chart-container.pie-chart { height: 360px; }
+            .chart-container.tall-chart { height: 420px; }
         }
         canvas { 
             position: relative !important;
@@ -41,6 +139,40 @@
         .kpi { font-size: 1.5rem; font-weight: bold; }
         .table-responsive { max-height: 400px; overflow-y: auto; }
         .border-left-warning { border-left: 4px solid #f39c12; }
+        /* Professional theme accents */
+        :root {
+            --brand-primary: #0d6efd;
+            --brand-accent: #6c5ce7;
+            --brand-muted: #6c757d;
+            --brand-bg-alt: #ffffff;
+        }
+        h3 { font-weight: 600; letter-spacing: .5px; }
+        .section-heading-icon { font-size: 1.2rem; opacity: .7; margin-right: .35rem; }
+        .meta-panel { background: var(--brand-bg-alt); border: 1px solid #e3e6ea; border-radius: .5rem; padding: 1rem 1.25rem; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+        .meta-badge { display: inline-flex; flex-direction: column; padding: .5rem .75rem; background: #f1f3f5; border-radius: .5rem; min-width: 140px; margin: .25rem .5rem .25rem 0; }
+        .meta-badge span.label { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--brand-muted); }
+        .meta-badge span.value { font-weight: 600; font-size: .95rem; }
+        .kpi-cards .kpi-card { background: var(--brand-bg-alt); border: 1px solid #e3e6ea; border-radius: .65rem; padding: .9rem .95rem; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,.05); position: relative; }
+        .kpi-cards .kpi-card .kpi-label { font-size: .7rem; text-transform: uppercase; color: var(--brand-muted); letter-spacing: .05em; margin-bottom: .25rem; font-weight: 600; }
+        .kpi-cards .kpi-card .kpi-value { font-size: 1.35rem; font-weight: 700; color: #212529; }
+        .kpi-cards .kpi-card .kpi-sub { font-size: .65rem; color: var(--brand-muted); }
+        .chart-container canvas { outline: none; }
+        footer.dashboard-footer { font-size: .7rem; color: var(--brand-muted); text-align: center; margin-top: 3rem; padding: 1rem 0 2rem; }
+        .alert-info small, .alert-warning small { font-size: .7rem; }
+    .chart-tools button { border: none; background: transparent; padding: 2px 6px; font-size: .8rem; cursor: pointer; color: var(--brand-muted); }
+    .chart-tools button:hover { color: #000; }
+    body.dark-mode { background:#121317; color:#e6e6e6; }
+    body.dark-mode .meta-panel, body.dark-mode .kpi-cards .kpi-card, body.dark-mode .chart-container { background:#1e1f24; border-color:#2b2d33; }
+    body.dark-mode .kpi-value { color:#fff; }
+    body.dark-mode .meta-badge { background:#26272d; }
+    body.dark-mode .alert-info { background:#243040; color:#d5e8ff; }
+    body.dark-mode .alert-warning { background:#3a2f05; }
+    body.dark-mode .badge.bg-primary { background:#0d6efd !important; }
+    body.dark-mode .badge.bg-danger { background:#dc3545 !important; }
+    body.dark-mode .table { color:#e6e6e6; }
+    body.dark-mode .table-striped>tbody>tr:nth-of-type(odd)>* { --bs-table-accent-bg: rgba(255,255,255,0.03); }
+    body.dark-mode .chart-tools button { color:#9aa0ac; }
+    body.dark-mode .chart-tools button:hover { color:#fff; }
         
         /* Print styles for browser printing */
         @media print {
@@ -57,9 +189,17 @@
 </head>
 <body>
 <div class="container py-4" id="dashboard">
-    <h1 class="mb-4 text-center">Work Item Analytics Dashboard</h1>
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+        <h1 class="mb-0 text-center flex-grow-1">Work Item Analytics Dashboard</h1>
+        <div class="ms-auto d-flex gap-2 mt-3 mt-md-0">
+            <button id="darkModeToggle" class="btn btn-sm btn-outline-secondary" type="button" aria-pressed="false" aria-label="Toggle dark mode">🌙 Dark</button>
+        </div>
+    </div>
     <div class="mb-3">
         <input type="file" id="csvFileInput" accept=".csv" class="form-control">
+    </div>
+    <div id="datasetMeta" class="meta-panel mb-3" aria-live="polite" aria-label="Dataset metadata summary" style="display:none;">
+        <div class="d-flex flex-wrap" id="datasetMetaContent"></div>
     </div>
     <div id="kpiSection" class="dashboard-section row text-center"></div>
     
@@ -74,18 +214,22 @@
     </div>
     
     <div class="dashboard-section row">
-        <div class="col-md-6 chart-container">
+    <div class="col-md-6 chart-container pie-chart">
+            <div class="d-flex justify-content-between align-items-center mb-1 small fw-semibold"><span>PBIs Closed vs Open per Developer</span><div class="chart-tools" data-chart="ticketsPerPersonChart"></div></div>
             <canvas id="ticketsPerPersonChart"></canvas>
         </div>
-        <div class="col-md-6 chart-container">
+    <div class="col-md-6 chart-container pie-chart">
+            <div class="d-flex justify-content-between align-items-center mb-1 small fw-semibold"><span>Monthly PBIs Closed Trend</span><div class="chart-tools" data-chart="ticketsOverTimeChart"></div></div>
             <canvas id="ticketsOverTimeChart"></canvas>
         </div>
     </div>
     <div class="dashboard-section row">
-        <div class="col-md-6 chart-container">
+    <div class="col-md-6 chart-container small-chart">
+            <div class="d-flex justify-content-between align-items-center mb-1 small fw-semibold"><span>Current State Distribution</span><div class="chart-tools" data-chart="ticketStatePieChart"></div></div>
             <canvas id="ticketStatePieChart"></canvas>
         </div>
-        <div class="col-md-6 chart-container">
+    <div class="col-md-6 chart-container small-chart">
+            <div class="d-flex justify-content-between align-items-center mb-1 small fw-semibold"><span>Work Item Type Distribution</span><div class="chart-tools" data-chart="ticketTypePieChart"></div></div>
             <canvas id="ticketTypePieChart"></canvas>
         </div>
     </div>
@@ -109,13 +253,15 @@
     <!-- Reordered Sections as requested -->
     <div class="dashboard-section">
         <h3>PBI Inflow vs Outflow Trends</h3>
-        <div class="chart-container">
+    <div class="chart-container tall-chart">
+            <div class="d-flex justify-content-between align-items-center mb-1 small fw-semibold"><span>PBI Inflow vs Outflow Trends</span><div class="chart-tools" data-chart="inflowOutflowChart"></div></div>
             <canvas id="inflowOutflowChart"></canvas>
         </div>
     </div>
     <div class="dashboard-section">
         <h3>Quarterly Closed PBI's & Average State Duration</h3>
-        <div class="chart-container">
+    <div class="chart-container tall-chart">
+            <div class="d-flex justify-content-between align-items-center mb-1 small fw-semibold"><span>Quarterly Closed & Avg State Duration</span><div class="chart-tools" data-chart="quarterlyClosedChart"></div></div>
             <canvas id="quarterlyClosedChart"></canvas>
         </div>
         <div class="alert alert-info mt-3">
@@ -125,7 +271,8 @@
     </div>
     <div class="dashboard-section">
         <h3>Product Backlog Items - Aging Scatter Plot (State vs Age)</h3>
-        <div class="chart-container">
+    <div class="chart-container tall-chart">
+            <div class="d-flex justify-content-between align-items-center mb-1 small fw-semibold"><span>Aging Scatter Plot (State vs Age)</span><div class="chart-tools" data-chart="agingScatterChart"></div></div>
             <canvas id="agingScatterChart"></canvas>
         </div>
         <div class="row mt-3">
@@ -142,13 +289,15 @@
     </div>
     <div class="dashboard-section">
         <h3>Monthly Developer Performance Heatmap</h3>
-        <div class="chart-container" style="min-height: 620px;">
+    <div class="chart-container heatmap-container">
+            <div class="d-flex justify-content-between align-items-center mb-1 small fw-semibold"><span>Monthly Developer Performance Heatmap</span><div class="chart-tools" data-chart="developerHeatmapChart"></div></div>
             <canvas id="developerHeatmapChart"></canvas>
         </div>
     </div>
     <div class="dashboard-section">
         <h3>Features Created per Quarter</h3>
-        <div class="chart-container">
+    <div class="chart-container small-chart">
+            <div class="d-flex justify-content-between align-items-center mb-1 small fw-semibold"><span>Features Created per Quarter</span><div class="chart-tools" data-chart="featuresPerQuarterChart"></div></div>
             <canvas id="featuresPerQuarterChart"></canvas>
         </div>
         <div class="table-responsive mt-3">
@@ -346,6 +495,43 @@ function updateDashboard(data) {
     
     // Convert back to array with unique work items
     const uniqueData = Object.values(uniqueWorkItems);
+    // ================= Dataset Metadata Panel =================
+    (function renderDatasetMeta(){
+        const metaEl = document.getElementById('datasetMeta');
+        if (!metaEl) return;
+        const metaContent = document.getElementById('datasetMetaContent');
+        const totalRows = data.length;
+        const uniqueItems = uniqueData.length;
+        const firstDate = data
+            .map(r => parseDate(r['Created Date']))
+            .filter(d => d && !isNaN(d))
+            .sort((a,b)=>a-b)[0];
+        const lastDate = data
+            .map(r => parseDate(r['State Change Date'] || r['Closed Date'] || r['Changed Date'] || r['Created Date']))
+            .filter(d => d && !isNaN(d))
+            .sort((a,b)=>b-a)[0];
+        const spanDays = (firstDate && lastDate) ? Math.max(1, Math.round((lastDate - firstDate)/(1000*60*60*24))) : 0;
+        const people = new Set();
+        uniqueData.forEach(r => { if (r['Assigned To']) people.add(r['Assigned To']); });
+        const states = new Set(uniqueData.map(r => r['State']).filter(Boolean));
+        const types = new Set(uniqueData.map(r => r['Work Item Type'] || r['Type']).filter(Boolean));
+        const blockedCount = uniqueData.filter(r => (r['DEBLOCKED'] === 'TRUE' || r['DEBLOCKED'] === true || r['DEBLOCKED'] === 'True')).length;
+        const blockedPct = uniqueItems ? ((blockedCount/uniqueItems)*100).toFixed(1) : '0.0';
+        metaContent.innerHTML = `
+            <div class="meta-badge" title="Total raw rows loaded from CSV"><span class="label">Raw Rows</span><span class="value">${totalRows}</span></div>
+            <div class="meta-badge" title="Distinct work items after latest-state consolidation"><span class="label">Unique Items</span><span class="value">${uniqueItems}</span></div>
+            <div class="meta-badge" title="Date span covered by dataset"><span class="label">Date Span</span><span class="value">${spanDays}d</span></div>
+            <div class="meta-badge" title="First creation date detected"><span class="label">From</span><span class="value">${firstDate ? firstDate.toLocaleDateString() : '—'}</span></div>
+            <div class="meta-badge" title="Last activity / change date detected"><span class="label">To</span><span class="value">${lastDate ? lastDate.toLocaleDateString() : '—'}</span></div>
+            <div class="meta-badge" title="Distinct assignees (current state)"><span class="label">People</span><span class="value">${people.size}</span></div>
+            <div class="meta-badge" title="Distinct states represented"><span class="label">States</span><span class="value">${states.size}</span></div>
+            <div class="meta-badge" title="Distinct work item types"><span class="label">Types</span><span class="value">${types.size}</span></div>
+            <div class="meta-badge" title="Items currently blocked (DEBLOCKED=TRUE)"><span class="label">Blocked</span><span class="value">${blockedCount} (${blockedPct}%)</span></div>
+            <div class="meta-badge" title="Data refresh timestamp"><span class="label">Refreshed</span><span class="value">${new Date().toLocaleTimeString()}</span></div>
+        `;
+        metaEl.style.display = 'block';
+    })();
+    // ===========================================================
     // Restrict to Product Backlog Items for PBI-specific metrics and charts
     const pbisUnique = uniqueData.filter(row => (row['Work Item Type'] || '').toLowerCase() === 'product backlog item');
     
@@ -585,11 +771,28 @@ function updateDashboard(data) {
     // Removed Avg Age (Open) KPI per request
     
     document.getElementById('kpiSection').innerHTML = `
-        <div class="col-md-2 kpi">Total PBI's: ${totalTickets}</div>
-        <div class="col-md-2 kpi">PBI's Closed: ${totalClosed}</div>
-    <div class="col-md-2 kpi">Open PBI's: ${openTicketsCount}</div>
-    <div class="col-md-3 kpi">Avg Closed/Person: ${avgClosedPerPerson}</div>
-    `;
+        <div class="kpi-cards d-flex flex-wrap gap-3" role="list" aria-label="Key performance indicators">
+            <div class="kpi-card flex-grow-1" role="listitem" tabindex="0" aria-label="Total PBIs ${totalTickets}">
+                <div class="kpi-label">Total PBIs</div>
+                <div class="kpi-value">${totalTickets}</div>
+                <div class="kpi-sub">All unique work items</div>
+            </div>
+            <div class="kpi-card flex-grow-1" role="listitem" tabindex="0" aria-label="Closed PBIs ${totalClosed}">
+                <div class="kpi-label">Closed PBIs</div>
+                <div class="kpi-value">${totalClosed}</div>
+                <div class="kpi-sub">Lifecycle completed</div>
+            </div>
+            <div class="kpi-card flex-grow-1" role="listitem" tabindex="0" aria-label="Open PBIs ${openTicketsCount}">
+                <div class="kpi-label">Open PBIs</div>
+                <div class="kpi-value">${openTicketsCount}</div>
+                <div class="kpi-sub">Currently active</div>
+            </div>
+            <div class="kpi-card flex-grow-1" role="listitem" tabindex="0" aria-label="Average closed per person ${avgClosedPerPerson}">
+                <div class="kpi-label">Avg Closed / Person</div>
+                <div class="kpi-value">${avgClosedPerPerson}</div>
+                <div class="kpi-sub">Throughput efficiency</div>
+            </div>
+        </div>`;
     
     // Calculate and display blocked items summary (exclude State = "Blocked" since we use DEBLOCKED column)
     const filteredDataForSummary = uniqueData.filter(row => {
@@ -655,42 +858,78 @@ function updateDashboard(data) {
         // Hide the blocked summary section if no blocked items
         document.getElementById('blockedSummarySection').style.display = 'none';
     }
-    // Tickets per person chart
+    // Stacked bar: PBIs Closed vs Open per developer
     const tppCtx = document.getElementById('ticketsPerPersonChart').getContext('2d');
-    new Chart(tppCtx, {
+    // Derive open PBIs per person from openUniqueTickets (current open unique PBIs)
+    const openByPerson = {};
+    openUniqueTickets.forEach(row => {
+        const assignee = (row['Assigned To'] || 'Unassigned').trim();
+        openByPerson[assignee] = (openByPerson[assignee] || 0) + 1;
+    });
+    // Closed already in closedByPerson
+    const allPeople = Array.from(new Set([...Object.keys(closedByPerson), ...Object.keys(openByPerson)])).sort();
+    const closedData = allPeople.map(p => closedByPerson[p] || 0);
+    const openData = allPeople.map(p => openByPerson[p] || 0);
+    registerChart('ticketsPerPersonChart', new Chart(tppCtx, {
         type: 'bar',
         data: {
-            labels: Object.keys(closedByPerson),
-            datasets: [{
-                label: 'PBI\'s Closed',
-                data: Object.values(closedByPerson),
-                backgroundColor: 'rgba(54, 162, 235, 0.6)'
-            }]
+            labels: allPeople,
+            datasets: [
+                {
+                    label: "Closed",
+                    data: closedData,
+                    backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                    stack: 'pbis'
+                },
+                {
+                    label: "Open",
+                    data: openData,
+                    backgroundColor: 'rgba(255, 159, 64, 0.8)',
+                    stack: 'pbis'
+                }
+            ]
         },
         options: {
+            animation: false,
             responsive: true,
             maintainAspectRatio: false,
             events: ['mousemove','mouseout','click','touchstart','touchmove','touchend'],
-            interaction: { intersect: false, mode: 'nearest' },
+            interaction: { intersect: false, mode: 'index' },
             plugins: {
-                legend: { display: false },
+                legend: { display: true, position: 'top' },
                 tooltip: {
                     enabled: true,
+                    mode: 'index',
                     callbacks: {
-                        title: safe(function(context) { return context[0].label; }, ''),
-                        label: safe(function(context) { return `PBI's Closed: ${context.parsed.y}`; }, '')
+                        title: safe(function(ctx){ return ctx[0].label; }, ''),
+                        label: safe(function(context){
+                            if (context.dataset.label === 'Closed') {
+                                return `Closed PBIs: ${context.parsed.y}`;
+                            } else if (context.dataset.label === 'Open') {
+                                return `Open PBIs: ${context.parsed.y}`;
+                            }
+                            return `${context.dataset.label}: ${context.parsed.y}`;
+                        }, ''),
+                        afterBody: safe(function(context){
+                            // Provide totals line
+                            const idx = context[0].dataIndex;
+                            const closedVal = closedData[idx];
+                            const openVal = openData[idx];
+                            const total = closedVal + openVal;
+                            return [`Total PBIs: ${total}`];
+                        }, [])
                     }
                 }
             },
             scales: {
-                x: { ticks: { autoSkip: true, maxRotation: 30 } },
-                y: { beginAtZero: true }
+                x: { stacked: true, ticks: { autoSkip: true, maxRotation: 30 } },
+                y: { stacked: true, beginAtZero: true }
             }
         }
-    });
+    }));
     // Tickets over time chart (monthly, ordered)
     const totCtx = document.getElementById('ticketsOverTimeChart').getContext('2d');
-    new Chart(totCtx, {
+    registerChart('ticketsOverTimeChart', new Chart(totCtx, {
         type: 'line',
         data: {
             labels: monthKeys,
@@ -703,6 +942,7 @@ function updateDashboard(data) {
             }]
         },
         options: {
+            animation: false,
             responsive: true,
             maintainAspectRatio: false,
             events: ['mousemove','mouseout','click','touchstart','touchmove','touchend'],
@@ -717,7 +957,7 @@ function updateDashboard(data) {
                 }
             }
         }
-    });
+    }));
     
     // Inflow vs Outflow Chart - Calculate opened and closed tickets per month
     const inflowData = {}; // Tickets opened per month
@@ -745,7 +985,7 @@ function updateDashboard(data) {
     const allMonthKeys = [...new Set([...Object.keys(inflowData), ...Object.keys(outflowData)])].sort();
     
     const inflowOutflowCtx = document.getElementById('inflowOutflowChart').getContext('2d');
-    new Chart(inflowOutflowCtx, {
+    registerChart('inflowOutflowChart', new Chart(inflowOutflowCtx, {
         type: 'line',
         data: {
             labels: allMonthKeys,
@@ -850,7 +1090,7 @@ function updateDashboard(data) {
                 }
             }
         }
-    });
+    }));
     
     // Monthly Developer Performance Heatmap
     const monthlyDeveloperData = {};
@@ -988,7 +1228,7 @@ function updateDashboard(data) {
         return 'rgba(76, 175, 80, 0.8)';
     }
     
-    new Chart(developerHeatmapCtx, {
+    registerChart('developerHeatmapChart', new Chart(developerHeatmapCtx, {
         type: 'scatter',
         data: {
             datasets: [{
@@ -1009,6 +1249,7 @@ function updateDashboard(data) {
             }]
         },
         options: {
+            animation: false,
             responsive: true,
             maintainAspectRatio: false,
             events: ['mousemove','mouseout','click','touchstart','touchmove','touchend'],
@@ -1207,7 +1448,7 @@ function updateDashboard(data) {
                 }
             }
         ]
-    });
+    }));
     
     // Add a dynamic legend/scale for the heatmap
     const heatmapLegendHtml = `
@@ -1482,7 +1723,7 @@ function updateDashboard(data) {
     });
     
     const quarterlyClosedCtx = document.getElementById('quarterlyClosedChart').getContext('2d');
-    new Chart(quarterlyClosedCtx, {
+    registerChart('quarterlyClosedChart', new Chart(quarterlyClosedCtx, {
         type: 'bar',
         data: {
             labels: allQuarterKeys,
@@ -1490,6 +1731,7 @@ function updateDashboard(data) {
         },
         options: {
             responsive: true,
+            maintainAspectRatio: false,
             interaction: {
                 intersect: false,
                 mode: 'index'
@@ -1596,7 +1838,7 @@ function updateDashboard(data) {
                 }
             }
         }
-    });
+    }));
     
     // Features Created per Quarter (based on Created Date)
     const allFeatures = uniqueData.filter(row => (row['Work Item Type'] || '').toLowerCase() === 'feature');
@@ -1611,7 +1853,7 @@ function updateDashboard(data) {
     });
     
     const featuresPerQuarterCtx = document.getElementById('featuresPerQuarterChart').getContext('2d');
-    new Chart(featuresPerQuarterCtx, {
+    registerChart('featuresPerQuarterChart', new Chart(featuresPerQuarterCtx, {
         type: 'bar',
         data: {
             labels: featureQuarterKeys,
@@ -1653,7 +1895,7 @@ function updateDashboard(data) {
                 }
             }
         }
-    });
+    }));
     
     // Populate Features table (basic details, most recent first by Created Date)
     const parseDateSafe = (d) => {
@@ -1711,7 +1953,7 @@ function updateDashboard(data) {
     
     console.log('State color mapping:', stateLabels.map((label, i) => ({ state: label, color: pieStateColors[i] })));
     
-    new Chart(tspCtx, {
+    registerChart('ticketStatePieChart', new Chart(tspCtx, {
         type: 'pie',
         data: {
             labels: stateLabels,
@@ -1724,6 +1966,7 @@ function updateDashboard(data) {
         },
         options: {
             responsive: true,
+            maintainAspectRatio: false,
             plugins: {
                 legend: {
                     position: 'right',
@@ -1754,10 +1997,10 @@ function updateDashboard(data) {
                 }
             }
         }
-    });
+    }));
     // Ticket type pie chart
     const ttpCtx = document.getElementById('ticketTypePieChart').getContext('2d');
-    new Chart(ttpCtx, {
+    registerChart('ticketTypePieChart', new Chart(ttpCtx, {
         type: 'pie',
         data: {
             labels: Object.keys(typeCounts),
@@ -1766,8 +2009,8 @@ function updateDashboard(data) {
                 backgroundColor: ['#6610f2','#e83e8c','#fd7e14','#20c997','#6f42c1','#343a40']
             }]
         },
-        options: {responsive:true}
-    });
+        options: {responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right'}}}
+    }));
     
     // Continue with other existing functionality...
     
@@ -2016,13 +2259,18 @@ function updateDashboard(data) {
     // Set the canvas background color
     agingScatterCtx.canvas.style.backgroundColor = backgroundColor;
     
-    new Chart(agingScatterCtx, {
+    registerChart('agingScatterChart', new Chart(agingScatterCtx, {
         type: 'scatter',
         data: {
             datasets: Object.values(scatterDatasets)
         },
         options: {
             responsive: true,
+            maintainAspectRatio: false,
+            events: ['mousemove','mouseout','click','touchstart','touchmove','touchend'],
+            interaction: { mode: 'nearest', intersect: true },
+            layout: { padding: { top: 8, right: 12, bottom: 8, left: 12 } },
+            elements: { point: { hitRadius: 12, hoverRadius: 10 } },
             scales: {
                 x: {
                     type: 'linear',
@@ -2132,6 +2380,7 @@ function updateDashboard(data) {
                     }
                 },
                 tooltip: {
+                    enabled: true,
                     callbacks: {
                         title: function(tooltipItems) {
                             const p = tooltipItems[0];
@@ -2169,7 +2418,7 @@ function updateDashboard(data) {
                 padding: 20
             }
         }
-    });
+    }));
     
     // Update health indicator display
     const healthIndicator = document.getElementById('healthIndicator');
