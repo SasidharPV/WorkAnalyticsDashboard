@@ -105,27 +105,24 @@
             </table>
         </div>
     </div>
-    <div class="dashboard-section">
-        <h3>Feature Details - Implemented & In Progress</h3>
-        <div class="table-responsive">
-            <table class="table table-striped" id="featureDetailsTable">
-                <thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Developer</th><th>Created Date</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </div>
 
-    <div class="dashboard-section row">
-        <div class="col-md-6 chart-container">
-            <h3>PBI Age Distribution (Open PBI's)</h3>
-            <canvas id="ticketAgeHistogram"></canvas>
-        </div>
-        <div class="col-md-6 chart-container">
-            <h3>Average Age by State (Open PBI's)</h3>
-            <canvas id="ageByStateChart"></canvas>
+    <!-- Reordered Sections as requested -->
+    <div class="dashboard-section">
+        <h3>PBI Inflow vs Outflow Trends</h3>
+        <div class="chart-container">
+            <canvas id="inflowOutflowChart"></canvas>
         </div>
     </div>
-    
+    <div class="dashboard-section">
+        <h3>Quarterly Closed PBI's & Average State Duration</h3>
+        <div class="chart-container">
+            <canvas id="quarterlyClosedChart"></canvas>
+        </div>
+        <div class="alert alert-info mt-3">
+            <strong>📊 Blocked Duration Calculation:</strong> The red "Blocked" line shows the actual average number of days that PBI's were blocked (DEBLOCKED = TRUE) during their lifecycle. 
+            This is calculated by counting all historical entries where DEBLOCKED = TRUE for each work item, providing real blocked time data rather than estimates.
+        </div>
+    </div>
     <div class="dashboard-section">
         <h3>Product Backlog Items - Aging Scatter Plot (State vs Age)</h3>
         <div class="chart-container">
@@ -137,40 +134,18 @@
                     <strong>Product Backlog Items Only:</strong> 
                     <span class="badge bg-danger me-2">Red = Blocked (DEBLOCKED = TRUE)</span>
                     <span class="badge bg-primary me-2">Blue = Regular Items (DEBLOCKED = FALSE)</span>
-                    <br><small>Only Product Backlog Items are shown. Simple color coding: Red for blocked items, Blue for all other items.</small>
+                    <br><small>Hover to see: Title, Current State, Total Age, Blocked Days, States Traversed & per-state age, Developer.</small>
                 </div>
-                <div id="healthIndicator" class="alert" style="border-left: 5px solid; margin-top: 10px;">
-                    <!-- Health indicator will be populated by JavaScript -->
-                </div>
+                <div id="healthIndicator" class="alert" style="border-left: 5px solid; margin-top: 10px;"></div>
             </div>
         </div>
     </div>
-    
-    <div class="dashboard-section">
-        <h3>PBI Inflow vs Outflow Trends</h3>
-        <div class="chart-container">
-            <canvas id="inflowOutflowChart"></canvas>
-        </div>
-    </div>
-    
     <div class="dashboard-section">
         <h3>Monthly Developer Performance Heatmap</h3>
-    <div class="chart-container" style="min-height: 620px;">
+        <div class="chart-container" style="min-height: 620px;">
             <canvas id="developerHeatmapChart"></canvas>
         </div>
     </div>
-    
-    <div class="dashboard-section">
-        <h3>Quarterly Closed PBI's & Average State Duration</h3>
-        <div class="chart-container">
-            <canvas id="quarterlyClosedChart"></canvas>
-        </div>
-        <div class="alert alert-info mt-3">
-            <strong>📊 Blocked Duration Calculation:</strong> The red "Blocked" line shows the actual average number of days that PBI's were blocked (DEBLOCKED = TRUE) during their lifecycle. 
-            This is calculated by counting all historical entries where DEBLOCKED = TRUE for each work item, providing real blocked time data rather than estimates.
-        </div>
-    </div>
-    
     <div class="dashboard-section">
         <h3>Features Created per Quarter</h3>
         <div class="chart-container">
@@ -192,22 +167,6 @@
         </div>
     </div>
     
-    <div class="dashboard-section">
-        <h3>Aging Distribution Matrix: Age Ranges vs States (Open PBI's)</h3>
-        <div class="chart-container">
-            <canvas id="agingByStateChart"></canvas>
-        </div>
-    </div>
-    
-    <div class="dashboard-section">
-        <h3>Oldest Open PBI's by Developer</h3>
-        <div class="table-responsive">
-            <table class="table table-striped" id="agingTicketsTable">
-                <thead><tr><th>ID</th><th>Title</th><th>Developer</th><th>State</th><th>Age (Days)</th><th>Start Date</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </div>
 </div>
 <script>
 function parseQuarter(dateStr) {
@@ -332,8 +291,8 @@ function groupBy(arr, keyFn) {
 }
 function updateDashboard(data) {
     // Current date for comparison
-    const today = new Date();
-    const todayStr = today.toLocaleDateString('en-GB'); // DD/MM/YYYY format
+    const todayRef = new Date();
+    const todayStr = todayRef.toLocaleDateString('en-GB'); // DD/MM/YYYY format
     
     // Helper function to parse dates in MM/DD/YYYY format (based on temp2.csv format)
     function parseDate(dateStr) {
@@ -365,7 +324,7 @@ function updateDashboard(data) {
         if (row['Closed Date']) {
             const closedDate = parseDate(row['Closed Date']);
             // If closed date is in the future, use today's date instead
-            if (closedDate > today) {
+            if (closedDate > todayRef) {
                 return todayStr;
             }
             return row['Closed Date'];
@@ -437,8 +396,8 @@ function updateDashboard(data) {
         // Use Start Date if available, otherwise fall back to State Change Date, then Created Date
         let startDate = row['Start Date'] || row['State Change Date'] || row['Created Date'];
         
-        const developmentStartDate = parseDate(startDate);
-        const ageInDays = developmentStartDate ? Math.round((today - developmentStartDate) / (1000 * 60 * 60 * 24)) : 0;
+    const developmentStartDate = parseDate(startDate);
+    const ageInDays = developmentStartDate ? Math.round((todayRef - developmentStartDate) / (1000 * 60 * 60 * 24)) : 0;
         return {
             ...row,
             ageInDays: Math.max(0, ageInDays), // Ensure non-negative age
@@ -459,7 +418,7 @@ function updateDashboard(data) {
             key: `${closedDate.getFullYear()}-${String(closedDate.getMonth()+1).padStart(2,'0')}`,
             date: closedDate
         };
-    }).filter(item => item.date <= today); // Only include dates up to today
+    }).filter(item => item.date <= todayRef); // Only include dates up to today
     
     // Debug monthly calculations
     console.log('=== MONTHLY CALCULATIONS DEBUG ===');
@@ -482,7 +441,7 @@ function updateDashboard(data) {
     monthKeys.forEach(key => {
         closedByMonth[key] = closedTickets.filter(row => {
             const closedDate = parseDate(row['Closed Date']);
-            return closedDate <= today && `${closedDate.getFullYear()}-${String(closedDate.getMonth()+1).padStart(2,'0')}` === key;
+            return closedDate <= todayRef && `${closedDate.getFullYear()}-${String(closedDate.getMonth()+1).padStart(2,'0')}` === key;
         });
     });
     
@@ -613,7 +572,7 @@ function updateDashboard(data) {
         let startDate = row['Start Date'] || row['State Change Date'] || row['Created Date'];
         
         const developmentStartDate = parseDate(startDate);
-        const ageInDays = developmentStartDate ? Math.round((today - developmentStartDate) / (1000 * 60 * 60 * 24)) : 0;
+    const ageInDays = developmentStartDate ? Math.round((todayRef - developmentStartDate) / (1000 * 60 * 60 * 24)) : 0;
         return {
             ...row,
             ageInDays: Math.max(0, ageInDays), // Ensure non-negative age
@@ -623,22 +582,13 @@ function updateDashboard(data) {
     
     // Update KPIs with aging metrics using unique work items
     const openTicketsCount = openUniqueTickets.length;
-    const avgAgeAllOpen = openUniqueTicketsWithAge.length > 0 ? 
-        (openUniqueTicketsWithAge.reduce((sum, ticket) => sum + ticket.ageInDays, 0) / openUniqueTicketsWithAge.length).toFixed(1) : 0;
-
-    // Debug open tickets calculations
-    console.log('=== OPEN TICKETS DEBUG ===');
-    console.log('Open unique tickets count:', openTicketsCount);
-    console.log('Open tickets with age count:', openUniqueTicketsWithAge.length);
-    console.log('Sample open tickets with age:', openUniqueTicketsWithAge.slice(0, 3));
-    console.log('Average age calculation result:', avgAgeAllOpen);
+    // Removed Avg Age (Open) KPI per request
     
     document.getElementById('kpiSection').innerHTML = `
         <div class="col-md-2 kpi">Total PBI's: ${totalTickets}</div>
         <div class="col-md-2 kpi">PBI's Closed: ${totalClosed}</div>
-        <div class="col-md-2 kpi">Open PBI's: ${openTicketsCount}</div>
-        <div class="col-md-3 kpi">Avg Age (Open): ${avgAgeAllOpen} days</div>
-        <div class="col-md-3 kpi">Avg Closed/Person: ${avgClosedPerPerson}</div>
+    <div class="col-md-2 kpi">Open PBI's: ${openTicketsCount}</div>
+    <div class="col-md-3 kpi">Avg Closed/Person: ${avgClosedPerPerson}</div>
     `;
     
     // Calculate and display blocked items summary (exclude State = "Blocked" since we use DEBLOCKED column)
@@ -662,7 +612,7 @@ function updateDashboard(data) {
         totalBlockedItems.forEach(item => {
             const createdDate = parseDate(item['Created Date']);
             if (createdDate) {
-                const ageInDays = Math.floor((today - createdDate) / (1000 * 60 * 60 * 24));
+                const ageInDays = Math.floor((todayRef - createdDate) / (1000 * 60 * 60 * 24));
                 totalBlockedAge += ageInDays;
                 blockedItemsWithAge++;
             }
@@ -1851,7 +1801,7 @@ function updateDashboard(data) {
             // Calculate age for blocked items
             const createdDate = parseDate(row['Created Date']);
             if (createdDate) {
-                const ageInDays = Math.floor((today - createdDate) / (1000 * 60 * 60 * 24));
+                const ageInDays = Math.floor((todayRef - createdDate) / (1000 * 60 * 60 * 24));
                 blockedByState[currentState].totalAge += ageInDays;
             }
         }
@@ -1892,37 +1842,7 @@ function updateDashboard(data) {
         </tr>`;
     }).join('');
     
-    // Feature details table - showing implemented and in progress features ONLY (no Product Backlog Items) using unique work items
-    const featureDetails = uniqueData.filter(row => {
-        const workItemType = row['Work Item Type'] || '';
-        const status = row['State'] || '';
-        // Include ONLY Features that are Done or In Progress
-        return workItemType === 'Feature' && 
-               (status === 'Done' || status === 'In Progress' || status === 'Development' || status === 'Analysis' || status === 'Review' || status === 'Test');
-    }).map(row => ({
-        id: row['Work Item Id'] || 'N/A',
-        title: (row['Title'] || 'No Title').substring(0, 100) + ((row['Title'] || '').length > 100 ? '...' : ''), // Slightly longer titles since we removed a column
-        status: row['State'] || 'Unknown',
-        developer: row['Assigned To'] || 'Unassigned',
-        createdDate: row['Created Date'] ? row['Created Date'].split(' ')[0] : 'N/A' // Just the date part
-    })).sort((a, b) => {
-        // Sort by status (Done first, then others), then by developer
-        if (a.status === 'Done' && b.status !== 'Done') return -1;
-        if (a.status !== 'Done' && b.status === 'Done') return 1;
-        return a.developer.localeCompare(b.developer);
-    });
-    
-    const featureDetailsBody = document.querySelector('#featureDetailsTable tbody');
-    featureDetailsBody.innerHTML = featureDetails.map(row => {
-        const statusClass = row.status === 'Done' ? 'text-success' : 'text-warning';
-        return `<tr>
-            <td>${row.id}</td>
-            <td title="${row.title}">${row.title}</td>
-            <td><span class="${statusClass}">${row.status}</span></td>
-            <td>${row.developer}</td>
-            <td>${row.createdDate}</td>
-        </tr>`;
-    }).join('');
+    // Feature Details section removed per request.
     // Tickets closed by type using unique work items
     const ticketsByType = {};
     uniqueData.filter(row => row['State'] === 'Done').forEach(row => {
@@ -1930,87 +1850,61 @@ function updateDashboard(data) {
         ticketsByType[type] = (ticketsByType[type] || 0) + 1;
     });
     
-    // Age distribution histogram for open tickets using unique work items
-    // (openUniqueTickets and openUniqueTicketsWithAge already calculated above)
-    const ageBins = [0, 7, 14, 30, 60, 90, 180, 365];
-    const ageHistCounts = Array(ageBins.length).fill(0);
-    const ages = openUniqueTicketsWithAge.map(ticket => ticket.ageInDays);
-    
-    ages.forEach(age => {
-        for (let i = 0; i < ageBins.length; i++) {
-            if (age <= ageBins[i]) { 
-                ageHistCounts[i]++; 
-                break; 
-            }
-        }
+    // Removed age distribution & average age by state charts per request.
+
+    // Build state durations & blocked days per work item for enhanced scatter tooltip
+    const stateDurationsMap = {};
+    const rowsById = {};
+    data.forEach(r => {
+        const id = r['Work Item Id'] || r['ID'] || r['Id'];
+        if (!id) return;
+        if (!rowsById[id]) rowsById[id] = [];
+        rowsById[id].push(r);
     });
-    
-    const ageHistLabels = ageBins.map((bin, i) => i === 0 ? `≤${bin} days` : `${ageBins[i-1]+1}-${bin} days`);
-    
-    const ageHistCtx = document.getElementById('ticketAgeHistogram').getContext('2d');
-    new Chart(ageHistCtx, {
-        type: 'bar',
-        data: {
-            labels: ageHistLabels,
-            datasets: [{
-                label: 'Open Tickets',
-                data: ageHistCounts,
-                backgroundColor: 'rgba(255, 159, 64, 0.6)',
-                borderColor: 'rgba(255, 159, 64, 1)',
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        stepSize: 1
-                    }
-                }
+    // Use existing todayRef for consistency
+    const todayLocal = todayRef;
+    Object.entries(rowsById).forEach(([id, rows]) => {
+        // Sort by State Change Date then Created Date
+        rows.sort((a,b) => {
+            const da = new Date(a['State Change Date'] || a['Changed Date'] || a['Created Date'] || a['CreatedDate'] || a['ChangedDate'] || todayLocal);
+            const db = new Date(b['State Change Date'] || b['Changed Date'] || b['Created Date'] || b['CreatedDate'] || b['ChangedDate'] || todayLocal);
+            return da - db;
+        });
+        const timeline = [];
+        const seen = new Set();
+        rows.forEach(row => {
+            const state = row['State'] || 'Unknown';
+            const dateStr = row['State Change Date'] || row['Changed Date'] || row['ChangedDate'] || row['Created Date'] || row['CreatedDate'];
+            if (!dateStr) return;
+            const dt = new Date(dateStr);
+            if (isNaN(dt)) return;
+            // Add every occurrence that represents a change (first time we see state or different from last)
+            if (timeline.length === 0 || timeline[timeline.length-1].state !== state) {
+                timeline.push({ state, date: dt });
             }
+            seen.add(state);
+        });
+        if (timeline.length === 0) return;
+        const durations = [];
+        for (let i=0; i<timeline.length; i++) {
+            const cur = timeline[i];
+            const next = timeline[i+1];
+        const endDate = next ? next.date : todayRef;
+            const days = Math.max(0, Math.round((endDate - cur.date)/(1000*60*60*24)));
+            durations.push({ state: cur.state, days });
         }
-    });
-    
-    // Average age by state for open tickets using unique work items
-    const ageByState = {};
-    openUniqueTicketsWithAge.forEach(ticket => {
-        const state = ticket['State'] || 'Unknown';
-        if (!ageByState[state]) {
-            ageByState[state] = { totalAge: 0, count: 0 };
-        }
-        ageByState[state].totalAge += ticket.ageInDays;
-        ageByState[state].count += 1;
-    });
-    
-    const ageByStateData = Object.entries(ageByState).map(([state, stats]) => ({
-        state: state,
-        avgAge: stats.count > 0 ? (stats.totalAge / stats.count).toFixed(1) : 0,
-        count: stats.count
-    })).sort((a, b) => parseFloat(b.avgAge) - parseFloat(a.avgAge));
-    
-    const ageByStateCtx = document.getElementById('ageByStateChart').getContext('2d');
-    new Chart(ageByStateCtx, {
-        type: 'bar',
-        data: {
-            labels: ageByStateData.map(item => `${item.state} (${item.count})`),
-            datasets: [{
-                label: 'Average Age (Days)',
-                data: ageByStateData.map(item => parseFloat(item.avgAge)),
-                backgroundColor: 'rgba(255, 99, 132, 0.6)',
-                borderColor: 'rgba(255, 99, 132, 1)',
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            scales: {
-                y: {
-                    beginAtZero: true
-                }
-            }
-        }
+        const totalAge = durations.reduce((s,d)=>s+d.days,0);
+        const blockedDays = rows.filter(r => {
+            const val = r['DEBLOCKED'] || r['Deblocked'] || r['deblocked'];
+            return val === true || String(val).toLowerCase() === 'true' || val === 1 || val === '1';
+        }).length; // assuming each row ~ daily snapshot
+        stateDurationsMap[id] = {
+            durations,
+            totalAge,
+            blockedDays,
+            statesTraversed: durations.length,
+            currentState: durations[durations.length-1]?.state || 'Unknown'
+        };
     });
     
     // Aging Scatter Chart - State vs Age with blocked highlighting (Product Backlog Items only)
@@ -2240,28 +2134,33 @@ function updateDashboard(data) {
                 tooltip: {
                     callbacks: {
                         title: function(tooltipItems) {
-                            const point = tooltipItems[0];
-                            const ticket = scatterData.find(d => d.x === point.parsed.x && d.y === point.parsed.y);
-                            return ticket ? `ID: ${ticket.ticket['Work Item Id'] || 'N/A'}` : '';
+                            const p = tooltipItems[0];
+                            const found = scatterData.find(d => d.x === p.parsed.x && d.y === p.parsed.y);
+                            if (!found) return '';
+                            return `ID: ${found.ticket['Work Item Id'] || 'N/A'}`;
                         },
-                        label: function(context) {
-                            const point = scatterData.find(d => d.x === context.parsed.x && d.y === context.parsed.y);
-                            if (!point) return '';
-                            
-                            const ticket = point.ticket;
-                            const title = ticket['Title'] ? ticket['Title'].substring(0, 50) + '...' : 'No Title';
-                            const state = ticket['State'] || 'Unknown';
-                            const developer = ticket['Assigned To'] || 'Unassigned';
-                            const age = ticket.ageInDays;
-                            const blockedStatus = point.isBlocked ? ' (BLOCKED)' : '';
-                            
-                            return [
-                                `Title: ${title}`,
-                                `State: ${state}${blockedStatus}`,
-                                `Developer: ${developer}`,
-                                `Age: ${age} days`,
-                                `Start Date: ${ticket.developmentStartDate || 'N/A'}`
-                            ];
+                        label: function(ctx) {
+                            const found = scatterData.find(d => d.x === ctx.parsed.x && d.y === ctx.parsed.y);
+                            if (!found) return '';
+                            const t = found.ticket;
+                            const id = t['Work Item Id'];
+                            const sd = stateDurationsMap[id] || {};
+                            const durations = sd.durations || [];
+                            const title = t['Title'] ? (t['Title'].length>70 ? t['Title'].substring(0,67)+'...' : t['Title']) : 'No Title';
+                            const developer = t['Assigned To'] || 'Unassigned';
+                            const blocked = sd.blockedDays ?? 0;
+                            const lines = [];
+                            lines.push(`Title: ${title}`);
+                            lines.push(`Current State: ${(sd.currentState||t['State']||'Unknown')}${found.isBlocked?' (BLOCKED)':''}`);
+                            lines.push(`Developer: ${developer}`);
+                            lines.push(`Total Age: ${t.ageInDays} days`);
+                            lines.push(`Blocked Days: ${blocked}`);
+                            lines.push(`States Traversed: ${sd.statesTraversed || durations.length}`);
+                            durations.slice(0,10).forEach(d => {
+                                lines.push(` - ${d.state}: ${d.days}d`);
+                            });
+                            if (durations.length>10) lines.push(` - (+${durations.length-10} more)`);
+                            return lines;
                         }
                     }
                 }
@@ -2320,172 +2219,7 @@ function updateDashboard(data) {
         healthIndicator.innerHTML = '<strong>No Product Backlog Items found</strong>';
     }
     
-    // Aging Distribution Matrix - Shows states vs age ranges in matrix format
-    const agingMatrixData = {};
-    const stateColors = {
-        'In Progress': '#3498db',
-        'Development': '#e74c3c', 
-        'Analysis': '#f39c12',
-        'Review': '#2ecc71',
-        'Test': '#9b59b6',
-        'Blocked': '#e67e22',
-        'New': '#95a5a6',
-        'Unknown': '#34495e'
-    };
-    
-    // Get all unique states from open tickets using unique work items
-    const allStates = [...new Set(openUniqueTicketsWithAge.map(ticket => ticket['State'] || 'Unknown'))].sort();
-    
-    // Initialize matrix data structure
-    allStates.forEach(state => {
-        agingMatrixData[state] = {};
-        ageHistLabels.forEach(ageRange => {
-            agingMatrixData[state][ageRange] = 0;
-        });
-    });
-    
-    // Count tickets for each state-age combination using unique work items
-    openUniqueTicketsWithAge.forEach(ticket => {
-        const state = ticket['State'] || 'Unknown';
-        const age = ticket.ageInDays;
-        
-        // Find which age range this ticket belongs to
-        let ageRange = ageHistLabels[ageHistLabels.length - 1]; // default to last range
-        for (let i = 0; i < ageBins.length; i++) {
-            if (age <= ageBins[i]) {
-                ageRange = ageHistLabels[i];
-                break;
-            }
-        }
-        
-        agingMatrixData[state][ageRange]++;
-    });
-    
-    // Create datasets for matrix chart (each state is a separate dataset)
-    const matrixDatasets = allStates.map((state, index) => ({
-        label: state,
-        data: ageHistLabels.map(ageRange => ({
-            x: ageRange,
-            y: state,
-            v: agingMatrixData[state][ageRange]
-        })),
-        backgroundColor: stateColors[state] || '#7f8c8d',
-        borderColor: stateColors[state] || '#7f8c8d',
-        borderWidth: 1,
-        barThickness: 40,
-        categoryPercentage: 0.8,
-        barPercentage: 0.9
-    }));
-    
-    const agingByStateCtx = document.getElementById('agingByStateChart').getContext('2d');
-    new Chart(agingByStateCtx, {
-        type: 'bar',
-        data: {
-            labels: ageHistLabels,
-            datasets: allStates.map(state => ({
-                label: state,
-                data: ageHistLabels.map(ageRange => agingMatrixData[state][ageRange]),
-                backgroundColor: stateColors[state] || '#7f8c8d',
-                borderColor: stateColors[state] || '#7f8c8d',
-                borderWidth: 2,
-                stack: 'matrix'
-            }))
-        },
-        options: {
-            responsive: true,
-            indexAxis: 'y', // This makes it horizontal - states on Y-axis, age ranges as data
-            scales: {
-                x: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Number of Tickets',
-                        font: { size: 14, weight: 'bold' }
-                    },
-                    grid: { display: true, color: 'rgba(0,0,0,0.1)' }
-                },
-                y: {
-                    title: {
-                        display: true,
-                        text: 'States',
-                        font: { size: 14, weight: 'bold' }
-                    },
-                    grid: { display: false }
-                }
-            },
-            plugins: {
-                legend: {
-                    display: true,
-                    position: 'right',
-                    labels: { 
-                        usePointStyle: true,
-                        font: { size: 12 }
-                    }
-                },
-                tooltip: {
-                    mode: 'nearest',
-                    intersect: false,
-                    callbacks: {
-                        title: function(tooltipItems) {
-                            const item = tooltipItems[0];
-                            return `State: ${item.dataset.label}`;
-                        },
-                        label: function(context) {
-                            const ageRange = context.label;
-                            const count = context.raw;
-                            const state = context.dataset.label;
-                            
-                            // Calculate percentage of this state's tickets in this age range
-                            const stateTotal = ageHistLabels.reduce((sum, range) => 
-                                sum + agingMatrixData[state][range], 0);
-                            const percentage = stateTotal > 0 ? ((count / stateTotal) * 100).toFixed(1) : 0;
-                            
-                            return `${ageRange}: ${count} tickets (${percentage}% of ${state})`;
-                        },
-                        footer: function(tooltipItems) {
-                            const item = tooltipItems[0];
-                            const ageRange = item.label;
-                            const totalInRange = allStates.reduce((sum, state) => 
-                                sum + agingMatrixData[state][ageRange], 0);
-                            return `Total in ${ageRange}: ${totalInRange} tickets`;
-                        }
-                    }
-                }
-            },
-            layout: {
-                padding: { right: 20 }
-            }
-        }
-    });
-    
-    // Oldest open tickets table using unique work items
-    const oldestTickets = openUniqueTicketsWithAge
-        .sort((a, b) => b.ageInDays - a.ageInDays)
-        .slice(0, 20) // Top 20 oldest tickets
-        .map(ticket => ({
-            id: ticket['Work Item Id'] || ticket['ID'] || 'N/A',
-            title: (ticket['Title'] || 'No Title').substring(0, 80) + ((ticket['Title'] || '').length > 80 ? '...' : ''),
-            developer: ticket['Assigned To'] || 'Unassigned',
-            state: ticket['State'] || 'Unknown',
-            age: ticket.ageInDays,
-            startDate: ticket.developmentStartDate ? ticket.developmentStartDate.split(' ')[0] : 'N/A'
-        }));
-    
-    const agingTableBody = document.querySelector('#agingTicketsTable tbody');
-    agingTableBody.innerHTML = oldestTickets.map(ticket => {
-        let ageClass = 'text-success';
-        if (ticket.age > 90) ageClass = 'text-danger';
-        else if (ticket.age > 30) ageClass = 'text-warning';
-        
-        return `<tr>
-            <td>${ticket.id}</td>
-            <td title="${ticket.title}">${ticket.title}</td>
-            <td>${ticket.developer}</td>
-            <td><span class="badge bg-secondary">${ticket.state}</span></td>
-            <td><span class="${ageClass} fw-bold">${ticket.age}</span></td>
-            <td>${ticket.startDate}</td>
-        </tr>`;
-    }).join('');
+    // Aging Distribution Matrix and Oldest Open PBI logic removed (cleanup of dangling references to ageHistLabels).
     
 }
 document.getElementById('csvFileInput').addEventListener('change', function(e) {
