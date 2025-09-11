@@ -1127,6 +1127,16 @@ function updateDashboard(data) {
     });
     
     const sortedDevelopers = Array.from(developerSet).sort();
+    // Compute total PBIs closed by developer across all months
+    const totalsByDeveloper = {};
+    sortedDevelopers.forEach(dev => {
+        let sum = 0;
+        sortedMonths.forEach(month => {
+            const v = monthlyDeveloperData[month] && monthlyDeveloperData[month][dev] ? monthlyDeveloperData[month][dev] : 0;
+            sum += v;
+        });
+        totalsByDeveloper[dev] = sum;
+    });
     
     console.log('Debug Heatmap Data:');
     console.log('Sorted Months:', sortedMonths);
@@ -1394,6 +1404,10 @@ function updateDashboard(data) {
                         const x = xScale.getPixelForValue(i);
                         const name = (sortedDevelopers[i] || '').split(' ')[0] || '';
                         ctx.fillText(name, x, chartArea.bottom + 8);
+                        // Totals per developer under the name
+                        const total = totalsByDeveloper[sortedDevelopers[i]] || 0;
+                        ctx.font = 'bold 13px Arial';
+                        ctx.fillText(String(total), x, chartArea.bottom + 26);
                     }
                     // Months on right, centered per row
                     ctx.textAlign = 'left';
@@ -1453,7 +1467,7 @@ function updateDashboard(data) {
     // Add a dynamic legend/scale for the heatmap
     const heatmapLegendHtml = `
         <div style="margin-top: 10px; text-align: center;">
-            <strong>Heat Map Scale (PBI Count):</strong>
+            <strong>Heat Map Scale (PBI Count)</strong> • <em>Totals per developer shown under names</em>
             <span style="display: inline-block; margin: 0 10px;">
                 <span style="background: rgba(255, 152, 0, 0.8); padding: 8px 12px; margin: 2px; border: 1px solid #cc8400; color: #000; font-weight: bold;">0</span>
                 <span style="background: rgba(255, 235, 59, 0.9); padding: 8px 12px; margin: 2px; border: 1px solid #ccc; color: #000; font-weight: bold;">1</span>
