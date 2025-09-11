@@ -315,6 +315,28 @@
             </table>
         </div>
     </div>
+    <!-- All Tickets: Per-State Age Breakdown -->
+    <div class="dashboard-section">
+        <h3>Ticket State Ages (All Open & Closed)</h3>
+        <div class="alert alert-secondary py-2 small">Shows each ticket's current state, total age, blocked days, and days spent in each state.</div>
+        <div class="table-responsive">
+            <table class="table table-sm table-striped align-middle" id="ticketStateAgesTable">
+                <thead>
+                    <tr>
+                        <th style="white-space:nowrap;">Work Item ID</th>
+                        <th>Title</th>
+                        <th>Type</th>
+                        <th>Assigned To</th>
+                        <th>Current State</th>
+                        <th style="white-space:nowrap;">Total Age (d)</th>
+                        <th style="white-space:nowrap;">Blocked (d)</th>
+                        <th>Per-State Durations (days)</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
     
 </div>
 <script>
@@ -2163,6 +2185,43 @@ function updateDashboard(data) {
             currentState: durations[durations.length-1]?.state || 'Unknown'
         };
     });
+
+    // Populate Ticket State Ages table (all tickets)
+    (function renderTicketStateAges(){
+        const tbody = document.querySelector('#ticketStateAgesTable tbody');
+        if(!tbody) return;
+        // Build a lookup for latest row per ID for metadata (title, type, assignee)
+        const latestById = {};
+        data.forEach(r => {
+            const id = r['Work Item Id'] || r['ID'] || r['Id'];
+            if(!id) return;
+            const dt = new Date(r['State Change Date'] || r['Changed Date'] || r['ChangedDate'] || r['Created Date'] || r['CreatedDate'] || 0);
+            if(!latestById[id] || dt > latestById[id]._dt){ latestById[id] = { r, _dt: dt }; }
+        });
+        const ids = Object.keys(stateDurationsMap);
+        // Sort by total age desc for readability
+        ids.sort((a,b)=> (stateDurationsMap[b].totalAge||0) - (stateDurationsMap[a].totalAge||0));
+        const rowsHtml = ids.map(id => {
+            const info = stateDurationsMap[id];
+            const meta = latestById[id]?.r || {};
+            const title = (meta['Title'] || '').toString();
+            const safeTitle = title.length>120 ? title.slice(0,117)+'…' : title;
+            const type = meta['Work Item Type'] || meta['Type'] || '';
+            const assignee = meta['Assigned To'] || 'Unassigned';
+            const perState = (info.durations||[]).map(d => `${d.state}: ${d.days}`).join(', ');
+            return `<tr>
+                <td>${id}</td>
+                <td title="${title.replace(/\"/g,'&quot;')}">${safeTitle}</td>
+                <td>${type}</td>
+                <td>${assignee}</td>
+                <td>${info.currentState}</td>
+                <td class="text-end">${info.totalAge}</td>
+                <td class="text-end">${info.blockedDays}</td>
+                <td>${perState}</td>
+            </tr>`;
+        }).join('');
+        tbody.innerHTML = rowsHtml;
+    })();
     
     // Aging Scatter Chart - State vs Age with blocked highlighting (Product Backlog Items only)
     const scatterData = [];
